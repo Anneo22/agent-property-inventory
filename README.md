@@ -7,8 +7,17 @@ property. It separates a product model from a physical unit, a purchase from
 current possession, and a compatible interface from a merely similar object.
 
 The current canonical schema is v6. The implemented core is covered by source
-and integration tests. That is not a claim of a public release, a real-world
-adoption study, or a live v6 migration.
+and integration tests. That is not a claim of real-world adoption, insurer
+acceptance, or effortless upkeep.
+
+## Why I built this
+
+One bike-parts session removed four of seven items from my cart because the
+inventory showed that I already owned the equivalents: Torx bits, hex bits,
+tyre levers, spare valves, and the valve extender I nearly bought again. It
+also exposed the opposite failure: an expensive wheelset was missing while a
+sold wheelset was still recorded as owned. A useful agent needs a reliable
+bridge to the physical world, not another shopping list.
 
 ## Why I built this
 

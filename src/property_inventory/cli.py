@@ -887,7 +887,11 @@ def validate_runtime_owner(
         raise InventoryError("runtime inventory identity disagrees with the canonical store")
 
 
-def establish_existing_instance_ownership(args: argparse.Namespace) -> tuple[str, bool]:
+def establish_existing_instance_ownership(
+    args: argparse.Namespace,
+    *,
+    allow_unset_inventory_id: bool = False,
+) -> tuple[str, bool]:
     """Validate format 2, or provision a legacy claim for one-time adoption.
 
     The caller must hold the inventory lock.  A legacy binding is intentionally
@@ -911,6 +915,7 @@ def establish_existing_instance_ownership(args: argparse.Namespace) -> tuple[str
             args.catalogue_output,
             installation_id,
             inventory_id,
+            allow_unset_inventory_id=allow_unset_inventory_id,
         )
         return installation_id, False
     installation_id = legacy_installation_id(args.inventory_root)
@@ -1783,6 +1788,84 @@ def verify_bundle(
     finally:
         staged_database.unlink(missing_ok=True)
         staged_catalogue.unlink(missing_ok=True)
+
+
+def verify_rebind_source(paths: dict[str, Path]) -> dict:
+    """Verify a quiescent source without requiring its migration first."""
+    source = Store(paths["store"], allow_legacy=True)
+    if source.schema_version == SCHEMA_VERSION:
+        return verify_bundle(
+            paths,
+            paths["store"],
+            paths["database"],
+            paths["catalogue"],
+        )
+    if degradation := degraded_reasons(paths):
+        raise InventoryError(
+            "cannot rebind an inventory quarantined by a degraded restore: "
+            + "; ".join(degradation)
+        )
+    try:
+        migration = validate_migration(source.schema_version)
+    except CompatibilityError as error:
+        raise InventoryError(f"cannot rebind legacy inventory: {error}") from error
+    ensure_private_directory(paths["inventory_root"])
+    harden_private_tree(paths["data"])
+    harden_private_tree(paths["store"])
+    harden_private_tree(paths["runtime"])
+    if paths["media_root"] is not None:
+        harden_private_tree(paths["media_root"])
+    auxiliary = validate_auxiliary_data(paths["data"])
+    generation_before = canonical_store_digest(paths["store"])
+    with tempfile.TemporaryDirectory(
+        prefix="property-inventory-rebind-preflight-"
+    ) as temporary_name:
+        temporary = Path(temporary_name)
+        preflight_root = temporary / "inventory"
+        preflight_runtime = temporary / "runtime"
+        preflight_catalogue = temporary / "Inventory.md"
+        shutil.copytree(paths["data"], preflight_root / "Data", symlinks=True)
+        command = [
+            sys.executable,
+            "-m",
+            "property_inventory.cli",
+            "--inventory-root",
+            str(preflight_root),
+            "--runtime-dir",
+            str(preflight_runtime),
+            "--catalogue-output",
+            str(preflight_catalogue),
+            "--catalogue-scope",
+            paths["catalogue_scope"],
+            "--scope",
+            "private",
+        ]
+        if paths["media_root"] is not None:
+            command.extend(("--media-root", str(paths["media_root"])))
+        command.append("migrate")
+        try:
+            preflight = json.loads(run(command))
+        except (InventoryError, json.JSONDecodeError) as error:
+            raise InventoryError(
+                f"legacy inventory cannot complete its declared migration: {error}"
+            ) from error
+        if (
+            preflight.get("result", {}).get("from_schema") != source.schema_version
+            or preflight.get("result", {}).get("to_schema") != SCHEMA_VERSION
+            or preflight.get("checks", {}).get("verification", {}).get("failures")
+        ):
+            raise InventoryError("legacy inventory migration preflight did not pass")
+    generation_after = canonical_store_digest(paths["store"])
+    if generation_after != generation_before:
+        raise InventoryError("canonical generation changed during rebind verification")
+    return {
+        "status": "migration_required",
+        "schema_version": source.schema_version,
+        "target_schema_version": SCHEMA_VERSION,
+        "migration_action": migration.action,
+        "store_digest": generation_before,
+        "auxiliary_files": len(auxiliary),
+    }
 
 
 def git_store_is_clean(data_dir: Path, *, continue_batch: bool) -> None:
@@ -2953,6 +3036,26 @@ def command_init(args: argparse.Namespace) -> dict:
 
 def command_migrate(args: argparse.Namespace) -> dict:
     paths = data_paths(args.inventory_root, args.runtime_dir)
+
+    def finalize_owner_identity() -> None:
+        inventory_id = inventory_id_if_available(args.inventory_root)
+        if inventory_id is None:
+            return
+        binding = read_runtime_binding_record(args.inventory_root)
+        installation_id = (
+            binding["installation_id"]
+            if binding["format"] == 2
+            else legacy_installation_id(args.inventory_root)
+        )
+        claim_runtime_owner(
+            args.inventory_root,
+            args.runtime_dir,
+            args.media_root,
+            args.catalogue_output,
+            installation_id,
+            inventory_id,
+        )
+
     try:
         with inventory_lock(args.inventory_root):
             recover_pending_transaction(paths)
@@ -2980,6 +3083,7 @@ def command_migrate(args: argparse.Namespace) -> dict:
                     paths["catalogue"],
                 )
                 current = load_verified_store(paths)
+                finalize_owner_identity()
             finally:
                 lock.release()
             return {
@@ -3014,7 +3118,12 @@ def command_migrate(args: argparse.Namespace) -> dict:
             raise InventoryError(f"unsupported migration source schema: {store.schema_version}")
         from_schema = store.schema_version
         if from_schema == 1:
-            inventory_id = f"inv-{uuid.uuid4()}"
+            owner = read_runtime_owner(args.runtime_dir)
+            inventory_id = (
+                owner["inventory_id"]
+                if owner is not None and owner.get("inventory_id") is not None
+                else f"inv-{uuid.uuid4()}"
+            )
             store.rows["metadata"] = [
                 {"inventory_id": inventory_id, "schema_version": SCHEMA_VERSION}
             ]
@@ -3203,6 +3312,7 @@ def command_migrate(args: argparse.Namespace) -> dict:
         mutate,
         continue_batch=args.continue_batch,
         allow_legacy=True,
+        finalize_locked=finalize_owner_identity,
     )
 
 
@@ -11402,12 +11512,7 @@ def command_runtime_rebind(args: argparse.Namespace) -> dict:
             )
         if not requested_old_runtime.is_dir():
             raise InventoryError(f"bound runtime is missing: {requested_old_runtime}")
-        checks = verify_bundle(
-            old_paths,
-            old_paths["store"],
-            old_paths["database"],
-            old_paths["catalogue"],
-        )
+        checks = verify_rebind_source(old_paths)
         if new_runtime != requested_old_runtime:
             new_owner = read_runtime_owner(new_runtime)
             if new_owner is None and runtime_has_unowned_entries(new_runtime):
@@ -14768,7 +14873,10 @@ def execute(
                         "legacy inventory ownership is ambiguous; run init explicitly "
                         "to adopt this root and its projections"
                     )
-                installation_id, is_legacy = establish_existing_instance_ownership(args)
+                installation_id, is_legacy = establish_existing_instance_ownership(
+                    args,
+                    allow_unset_inventory_id=args.function is command_migrate,
+                )
                 if migration_rollback is not None:
                     record_bindingless_adoption_owner(args, migration_rollback[0])
                 legacy_adoption = (installation_id, is_legacy)
@@ -14799,7 +14907,9 @@ def execute(
             args.runtime_dir,
             args.media_root,
             args.catalogue_output,
-            legacy_adoption is not None and legacy_adoption[1],
+            args.function is command_migrate
+            or legacy_adoption is not None
+            and legacy_adoption[1],
         )
     )
     try:

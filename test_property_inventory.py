@@ -515,6 +515,234 @@ class PropertyInventoryLifecycleTest(unittest.TestCase):
         )
         self.assertFalse(proposal_blocked_runtime.exists())
 
+    def test_runtime_rebind_allows_the_documented_legacy_then_migrate_order(self) -> None:
+        metadata_path = self.store / "metadata.jsonl"
+        metadata = json.loads(metadata_path.read_text())
+        metadata["schema_version"] = 4
+        metadata_path.write_text(json.dumps(metadata, sort_keys=True) + "\n")
+        for table in legacy_inventory._CLI.V6_TABLES:
+            if table not in legacy_inventory._CLI.V4_TABLES:
+                (self.store / f"{table}.jsonl").unlink()
+
+        new_catalogue = self.scratch / "renamed-vault" / "Inventory.md"
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(CLI),
+                "--inventory-root",
+                str(self.root),
+                "--runtime-dir",
+                str(self.runtime),
+                "--catalogue-output",
+                str(new_catalogue),
+                "--scope",
+                "private",
+                "runtime-rebind",
+                "--from-runtime",
+                str(self.runtime),
+                "--from-catalogue-output",
+                str(self.root / "Inventory.md"),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr or completed.stdout)
+        rebound = json.loads(completed.stdout)
+        self.assertEqual(rebound["status"], "rebound")
+        self.assertEqual(rebound["checks"]["status"], "migration_required")
+        self.assertEqual(rebound["checks"]["schema_version"], 4)
+        self.assertEqual(rebound["checks"]["target_schema_version"], 6)
+        self.assertFalse(new_catalogue.exists())
+
+        migrated = self.cli("--catalogue-output", str(new_catalogue), "migrate")
+        self.assertEqual(migrated["result"]["from_schema"], 4)
+        self.assertEqual(migrated["result"]["to_schema"], 6)
+        self.assertEqual(
+            self.cli("--catalogue-output", str(new_catalogue), "status")[
+                "verification"
+            ]["failures"],
+            [],
+        )
+
+    def test_runtime_rebind_rejects_a_legacy_store_that_cannot_migrate(self) -> None:
+        metadata_path = self.store / "metadata.jsonl"
+        metadata = json.loads(metadata_path.read_text())
+        metadata["schema_version"] = 4
+        metadata_path.write_text(json.dumps(metadata, sort_keys=True) + "\n")
+        for table in legacy_inventory._CLI.V6_TABLES:
+            if table not in legacy_inventory._CLI.V4_TABLES:
+                (self.store / f"{table}.jsonl").unlink()
+        locations_path = self.store / "locations.jsonl"
+        location = locations_path.read_text().splitlines()[0]
+        locations_path.write_text(locations_path.read_text() + location + "\n")
+        owner_path = self.runtime / ".property-inventory-owner.json"
+        owner_before = owner_path.read_bytes()
+        new_catalogue = self.scratch / "invalid-legacy-vault" / "Inventory.md"
+
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(CLI),
+                "--inventory-root",
+                str(self.root),
+                "--runtime-dir",
+                str(self.runtime),
+                "--catalogue-output",
+                str(new_catalogue),
+                "--scope",
+                "private",
+                "runtime-rebind",
+                "--from-runtime",
+                str(self.runtime),
+                "--from-catalogue-output",
+                str(self.root / "Inventory.md"),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("cannot complete its declared migration", completed.stderr)
+        self.assertEqual(owner_path.read_bytes(), owner_before)
+        self.assertFalse(new_catalogue.exists())
+
+    def test_runtime_rebind_rejects_a_quarantined_legacy_store(self) -> None:
+        metadata_path = self.store / "metadata.jsonl"
+        metadata = json.loads(metadata_path.read_text())
+        metadata["schema_version"] = 4
+        metadata_path.write_text(json.dumps(metadata, sort_keys=True) + "\n")
+        for table in legacy_inventory._CLI.V6_TABLES:
+            if table not in legacy_inventory._CLI.V4_TABLES:
+                (self.store / f"{table}.jsonl").unlink()
+        (self.root / legacy_inventory._CLI.DEGRADED_MARKER).write_text(
+            json.dumps(
+                {"format": 1, "reasons": ["quarantined test restore"]},
+                sort_keys=True,
+            )
+            + "\n"
+        )
+        owner_path = self.runtime / ".property-inventory-owner.json"
+        owner_before = owner_path.read_bytes()
+        new_catalogue = self.scratch / "quarantined-legacy-vault" / "Inventory.md"
+
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(CLI),
+                "--inventory-root",
+                str(self.root),
+                "--runtime-dir",
+                str(self.runtime),
+                "--catalogue-output",
+                str(new_catalogue),
+                "--scope",
+                "private",
+                "runtime-rebind",
+                "--from-runtime",
+                str(self.runtime),
+                "--from-catalogue-output",
+                str(self.root / "Inventory.md"),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("quarantined by a degraded restore", completed.stderr)
+        self.assertEqual(owner_path.read_bytes(), owner_before)
+        self.assertFalse(new_catalogue.exists())
+
+    def test_runtime_rebind_preserves_current_schema_degraded_recovery_access(self) -> None:
+        (self.root / legacy_inventory._CLI.DEGRADED_MARKER).write_text(
+            json.dumps(
+                {"format": 1, "reasons": ["current-schema recovery fixture"]},
+                sort_keys=True,
+            )
+            + "\n"
+        )
+        new_catalogue = self.scratch / "current-degraded-vault" / "Inventory.md"
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(CLI),
+                "--inventory-root",
+                str(self.root),
+                "--runtime-dir",
+                str(self.runtime),
+                "--catalogue-output",
+                str(new_catalogue),
+                "--scope",
+                "private",
+                "runtime-rebind",
+                "--from-runtime",
+                str(self.runtime),
+                "--from-catalogue-output",
+                str(self.root / "Inventory.md"),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr or completed.stdout)
+        rebound = json.loads(completed.stdout)
+        self.assertEqual(rebound["status"], "rebound")
+        self.assertEqual(rebound["checks"]["status"], "degraded_unsafe_legacy")
+        self.assertTrue(new_catalogue.is_file())
+
+    def test_v1_rebind_promotes_the_new_owner_identity_and_recovers_null_owner(self) -> None:
+        for table in legacy_inventory._CLI.V6_TABLES:
+            if table not in legacy_inventory._CLI.V1_TABLES:
+                (self.store / f"{table}.jsonl").unlink()
+        owner_path = self.runtime / ".property-inventory-owner.json"
+        owner = json.loads(owner_path.read_text())
+        owner["inventory_id"] = None
+        owner_path.write_text(json.dumps(owner, indent=2, sort_keys=True) + "\n")
+        new_catalogue = self.scratch / "v1-renamed-vault" / "Inventory.md"
+        rebind = subprocess.run(
+            [
+                sys.executable,
+                str(CLI),
+                "--inventory-root",
+                str(self.root),
+                "--runtime-dir",
+                str(self.runtime),
+                "--catalogue-output",
+                str(new_catalogue),
+                "--scope",
+                "private",
+                "runtime-rebind",
+                "--from-runtime",
+                str(self.runtime),
+                "--from-catalogue-output",
+                str(self.root / "Inventory.md"),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(rebind.returncode, 0, rebind.stderr or rebind.stdout)
+        self.assertEqual(json.loads(rebind.stdout)["checks"]["schema_version"], 1)
+
+        migrated = self.cli("--catalogue-output", str(new_catalogue), "migrate")
+        inventory_id = migrated["result"]["inventory_id"]
+        self.assertEqual(json.loads(owner_path.read_text())["inventory_id"], inventory_id)
+        self.assertEqual(
+            self.cli("--catalogue-output", str(new_catalogue), "status")["status"],
+            "pass",
+        )
+
+        owner = json.loads(owner_path.read_text())
+        owner["inventory_id"] = None
+        owner_path.write_text(json.dumps(owner, indent=2, sort_keys=True) + "\n")
+        recovered = self.cli("--catalogue-output", str(new_catalogue), "migrate")
+        self.assertEqual(recovered["status"], "already_current")
+        self.assertEqual(json.loads(owner_path.read_text())["inventory_id"], inventory_id)
+        self.assertEqual(
+            self.cli("--catalogue-output", str(new_catalogue), "status")["status"],
+            "pass",
+        )
+
     def test_runtime_rebind_safely_updates_a_renamed_catalogue(self) -> None:
         old_catalogue = self.root / "Inventory.md"
         new_catalogue = self.scratch / "renamed-notes" / "Inventory.md"
