@@ -1,0 +1,44 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "fixture-public-zone-floor",
+      "properties": {
+        "location_id": "{{PUBLIC_ZONE_LOCATION_ID}}",
+        "sensitivity": "low",
+        "unit": "m"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[0, 0], [4, 0], [4, 3], [0, 3], [0, 0]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "fixture-restricted-zone-floor",
+      "properties": {
+        "location_id": "{{RESTRICTED_ZONE_LOCATION_ID}}",
+        "sensitivity": "high",
+        "unit": "m"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[0, 0], [2, 0], [2, 5], [0, 5], [0, 0]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "fixture-reserved-zone-floor",
+      "properties": {
+        "location_id": "{{RESERVED_ZONE_LOCATION_ID}}",
+        "sensitivity": "high",
+        "unit": "m"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[0, 0], [5, 0], [5, 2], [0, 2], [0, 0]]]
+      }
+    }
+  ]
+}

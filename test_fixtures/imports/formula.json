@@ -1,0 +1,13 @@
+[
+  {
+    "external_id": "formula-1",
+    "status": "planned",
+    "name": "=HYPERLINK(\"https://invalid.test\",\"unsafe formula\")",
+    "category": "unknown",
+    "date": "2026-08-03",
+    "notes": "+SUM(1,1)",
+    "quantity": null,
+    "condition": null,
+    "current_location": null
+  }
+]

@@ -1,0 +1,13 @@
+[
+  {
+    "case_id": "synthetic-label-1",
+    "truth_segments": [{"x": 0, "y": 0, "width": 10, "height": 10}],
+    "predicted_segments": [{"x": 0, "y": 0, "width": 10, "height": 10}],
+    "expected_fields": {"model": "AB-1"},
+    "observed_fields": {"model": "AB-1"},
+    "expected_barcode": "123",
+    "observed_barcode": "123",
+    "expected_duplicate_id": "itm-example",
+    "ranked_duplicate_ids": ["itm-example"]
+  }
+]

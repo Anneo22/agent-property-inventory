@@ -1,0 +1,25 @@
+{
+  "metadata": [
+    {"inventory_id": "inventory-fixture", "schema_version": 5}
+  ],
+  "items": [
+    {
+      "item_id": "item-a",
+      "location_id": "room-a",
+      "ownership_state": "confirmed",
+      "quantity": 1,
+      "unit": "item",
+      "unknown_from_import": {"confidence": "unknown"}
+    },
+    {
+      "item_id": "item-b",
+      "location_id": "room-a",
+      "ownership_state": "confirmed",
+      "quantity": 1,
+      "unit": "item"
+    }
+  ],
+  "item_tags": [
+    {"item_id": "item-a", "tag": "fixture"}
+  ]
+}

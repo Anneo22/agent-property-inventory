@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-property-inventory"
+version = "0.1.0"
+description = "An evidence-backed property inventory for agents and local automation."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Property Inventory contributors" }]
+dependencies = ["filelock>=3,<4", "Pillow>=12.3,<13", "pypdf>=6,<7"]
+
+[project.urls]
+Homepage = "https://github.com/Anneo22/agent-property-inventory"
+Repository = "https://github.com/Anneo22/agent-property-inventory"
+Issues = "https://github.com/Anneo22/agent-property-inventory/issues"
+
+[project.optional-dependencies]
+mcp = ["mcp>=2,<3"]
+dev = ["ruff>=0.12,<1"]
+
+[project.scripts]
+property-inventory = "property_inventory.cli:main"
+property-inventory-mcp = "property_inventory.mcp_server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/property_inventory"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/docs/plans/**"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]

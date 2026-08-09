@@ -1,0 +1,3 @@
+external_id,status,name,category,date,quantity,unit,reference_url,notes
+cart-1,cart,Wheel seal,cycle part,2026-08-01,2,item,https://example.test/seal,cart evidence only
+order-1,ordered,Chain tool,tool,2026-08-02,1,item,https://example.test/tool,ordered but not received

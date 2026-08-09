@@ -1,0 +1,42 @@
+{
+  "corpus_label": "synthetic",
+  "rows": {
+    "items": [
+      {"item_id": "item-a", "sensitivity": "low"},
+      {"item_id": "item-b", "sensitivity": "low"}
+    ],
+    "evidence": [
+      {"evidence_id": "evidence-synthetic", "sensitivity": "low"}
+    ],
+    "maintenance_sessions": [
+      {"maintenance_session_id": "maintenance-week-1", "performed_on": "2026-07-06", "activity": "synthetic upkeep fixture", "elapsed_seconds": 10, "correction_count": 0, "review_count": 1, "evidence_id": "evidence-synthetic", "sensitivity": "low", "notes": null},
+      {"maintenance_session_id": "maintenance-week-2", "performed_on": "2026-07-13", "activity": "synthetic upkeep fixture", "elapsed_seconds": 20, "correction_count": 1, "review_count": 2, "evidence_id": "evidence-synthetic", "sensitivity": "low", "notes": null},
+      {"maintenance_session_id": "maintenance-week-3", "performed_on": "2026-07-20", "activity": "synthetic upkeep fixture", "elapsed_seconds": 30, "correction_count": 2, "review_count": 3, "evidence_id": "evidence-synthetic", "sensitivity": "low", "notes": null},
+      {"maintenance_session_id": "maintenance-week-4", "performed_on": "2026-07-27", "activity": "synthetic upkeep fixture", "elapsed_seconds": 40, "correction_count": 3, "review_count": 4, "evidence_id": "evidence-synthetic", "sensitivity": "low", "notes": null}
+    ],
+    "maintenance_session_items": [
+      {"maintenance_session_id": "maintenance-week-1", "item_id": "item-a"},
+      {"maintenance_session_id": "maintenance-week-1", "item_id": "item-b"},
+      {"maintenance_session_id": "maintenance-week-2", "item_id": "item-a"},
+      {"maintenance_session_id": "maintenance-week-2", "item_id": "item-b"},
+      {"maintenance_session_id": "maintenance-week-3", "item_id": "item-a"},
+      {"maintenance_session_id": "maintenance-week-3", "item_id": "item-b"},
+      {"maintenance_session_id": "maintenance-week-4", "item_id": "item-a"},
+      {"maintenance_session_id": "maintenance-week-4", "item_id": "item-b"}
+    ]
+  },
+  "expected_summary": {
+    "session_count": 4,
+    "elapsed_seconds": 100,
+    "correction_count": 6,
+    "review_count": 10,
+    "item_link_count": 8,
+    "observed_week_count": 4
+  },
+  "expected_weeks": [
+    {"week_start": "2026-07-06", "session_count": 1, "elapsed_seconds": 10, "correction_count": 0, "review_count": 1, "item_link_count": 2},
+    {"week_start": "2026-07-13", "session_count": 1, "elapsed_seconds": 20, "correction_count": 1, "review_count": 2, "item_link_count": 2},
+    {"week_start": "2026-07-20", "session_count": 1, "elapsed_seconds": 30, "correction_count": 2, "review_count": 3, "item_link_count": 2},
+    {"week_start": "2026-07-27", "session_count": 1, "elapsed_seconds": 40, "correction_count": 3, "review_count": 4, "item_link_count": 2}
+  ]
+}

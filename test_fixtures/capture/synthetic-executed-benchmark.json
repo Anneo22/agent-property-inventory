@@ -1,0 +1,36 @@
+[
+  {
+    "case_id": "checked-synthetic-label",
+    "source": {
+      "source_id": "fixture-overview",
+      "base64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGMUkdNgwAaYsIoOWgkATJAAamC3iY4AAAAASUVORK5CYII=",
+      "content_type": "image/png",
+      "image_width": 8,
+      "image_height": 8
+    },
+    "truth_segments": [
+      {"x": 4, "y": 1, "width": 4, "height": 4}
+    ],
+    "expected_fields": {"label": "Fixture Device"},
+    "field_observations": {
+      "label": {"observation_index": 0, "payload_key": "text"}
+    },
+    "barcode": {"expected": "0123456789012", "observation_index": 1},
+    "duplicate": {
+      "expected_id": "item-fixture-device",
+      "observation_index": 1,
+      "candidates": [
+        {
+          "identifier": "item-fixture-device",
+          "barcodes": ["0123456789012"],
+          "display_text": "Recorded fixture device"
+        },
+        {
+          "identifier": "item-other-device",
+          "barcodes": ["9999999999999"],
+          "display_text": "Other device"
+        }
+      ]
+    }
+  }
+]
