@@ -40,13 +40,24 @@ coverage, or effortless adoption has been proven in the world.
    compatibility and reveal missing adapters.
 4. An insurer in the relevant jurisdiction must evaluate a real package. A
    valid package is preparation material, not coverage or a claim outcome.
-5. A release candidate still needs root-owned live/private and public-boundary
-   evidence. No public release is claimed here.
+5. Public release evidence proves the package boundary and supported platforms;
+   it does not prove real-world adoption, insurer acceptance, or effortless upkeep.
+
+## Release acceptance
+
+The v0.1.0 boundary is backed by a live private v4-to-v6 migration with retained
+backups, ID-preservation comparison, rebuild, render, semantic verification,
+foreign keys, export-and-restore doctor drill, and live CLI/MCP checks. The
+public repository is independently scanned from clean history and runs the
+source plus built wheel on Ubuntu and macOS with Python 3.11-3.14. Private data,
+runtime state, evidence media, and internal plans are excluded from the public
+package and repository.
 
 ## Next evidence campaign
 
 Use a private instance to reconcile real spaces, keep uncertain extraction at
 the review boundary, and record checked cases in a private benchmark corpus.
 Record upkeep through the maintenance commands rather than estimating it later.
-When root-owned live and public checks exist, run the release-acceptance batch
-from audited clean history without publishing private data.
+The next product evidence comes from the physical campaign, not more feature
+work: reconcile one named area and overview photo at a time, record real capture
+accuracy and upkeep cost, and keep uncertain extraction at the review boundary.
