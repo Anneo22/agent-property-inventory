@@ -51,7 +51,8 @@ foreign keys, export-and-restore doctor drill, and live CLI/MCP checks. The
 public repository is independently scanned from clean history and runs the
 source plus built wheel on Ubuntu and macOS with Python 3.11-3.14. Private data,
 runtime state, evidence media, and internal plans are excluded from the public
-package and repository.
+package and repository. The v0.1.1 patch makes repeated catalogue regeneration
+idempotent in Obsidian vaults that automatically manage a `Created` property.
 
 ## Next evidence campaign
 

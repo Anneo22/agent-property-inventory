@@ -88,7 +88,7 @@ from .media_validation import (
     validate_declared_media,
 )
 from .rebuild import SCHEMA_VERSION, capture_provenance_failures, location_assignment_error
-from .render import write_output_atomic
+from .render import catalogue_created_on, write_output_atomic
 from .retrieval import (
     RetrievalError,
     decode_page_cursor,
@@ -1682,6 +1682,16 @@ def verify_bundle(
     staged_database = database.with_name(f".{database.name}.verify-{token}")
     staged_catalogue = catalogue.with_name(f".{catalogue.name}.verify-{token}")
     try:
+        try:
+            created_on = (
+                catalogue_created_on(catalogue.read_text(encoding="utf-8"))
+                if catalogue.exists()
+                else None
+            )
+        except (OSError, UnicodeError, ValueError) as error:
+            raise InventoryError(
+                f"cannot read generated catalogue creation metadata: {error}"
+            ) from error
         generation_before = canonical_store_digest(store)
         rebuild_output = run(
             [
@@ -1695,20 +1705,21 @@ def verify_bundle(
                 str(staged_database),
             ]
         )
-        render_output = run(
-            [
-                sys.executable,
-                str(paths["render"]),
-                "--database",
-                str(staged_database),
-                "--output",
-                str(staged_catalogue),
-                "--scope",
-                paths["catalogue_scope"],
-                "--installation-id",
-                installation_id,
-            ]
-        )
+        render_command = [
+            sys.executable,
+            str(paths["render"]),
+            "--database",
+            str(staged_database),
+            "--output",
+            str(staged_catalogue),
+            "--scope",
+            paths["catalogue_scope"],
+            "--installation-id",
+            installation_id,
+        ]
+        if created_on is not None:
+            render_command.extend(("--created-on", created_on))
+        render_output = run(render_command)
         verify_command = [
             sys.executable,
             str(paths["verify"]),

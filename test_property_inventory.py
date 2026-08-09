@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -398,6 +399,25 @@ class PropertyInventoryLifecycleTest(unittest.TestCase):
             )
         }
         self.assertEqual(files, expected)
+
+    def test_status_preserves_created_property_and_repeats_byte_identically(self) -> None:
+        catalogue = self.root / "Inventory.md"
+        initial = catalogue.read_text()
+        current_created = re.search(
+            r"^Created: \d{4}-\d{2}-\d{2}$", initial, re.MULTILINE
+        )
+        self.assertIsNotNone(current_created)
+        historical = initial.replace(current_created.group(0), "Created: 2020-01-02")
+        catalogue.write_text(historical)
+
+        first = self.cli("status")
+        self.assertEqual(first["status"], "pass")
+        self.assertEqual(catalogue.read_text(), historical)
+        first_bytes = catalogue.read_bytes()
+
+        second = self.cli("status")
+        self.assertEqual(second["status"], "pass")
+        self.assertEqual(catalogue.read_bytes(), first_bytes)
         self.assertTrue((self.runtime / "inventory.sqlite").exists())
         self.assertTrue((self.runtime / "backups").is_dir())
 

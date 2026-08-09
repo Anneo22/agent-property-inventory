@@ -11,6 +11,7 @@ import re
 import sqlite3
 import tempfile
 from collections import defaultdict
+from datetime import date
 from pathlib import Path
 
 from filelock import FileLock
@@ -33,6 +34,10 @@ USABLE_CONDITIONS = frozenset(
 )
 OWNER_MARKER = re.compile(
     r"^<!-- canonical-inventory-owner-sha256:([0-9a-f]{64}) -->\n", re.MULTILINE
+)
+FRONTMATTER = re.compile(r"\A---\n(?P<body>.*?)\n---\n", re.DOTALL)
+CREATED_PROPERTY = re.compile(
+    r"^Created: (\d{4}-\d{2}-\d{2})$", re.MULTILINE
 )
 
 
@@ -57,6 +62,53 @@ def catalogue_owner(note: str) -> str:
     if len(matches) != 1:
         raise ValueError("generated catalogue must contain exactly one owner marker")
     return matches[0]
+
+
+def validate_created_on(value: str) -> str:
+    """Require one exact ISO calendar date."""
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise ValueError("generated catalogue Created property must be an ISO date")
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError(
+            "generated catalogue Created property must be an ISO date"
+        ) from error
+    if parsed.isoformat() != value:
+        raise ValueError("generated catalogue Created property must be an ISO date")
+    return value
+
+
+def catalogue_created_on(note: str) -> str | None:
+    """Read one valid Obsidian creation date from initial YAML frontmatter."""
+    frontmatter = FRONTMATTER.match(note)
+    if frontmatter is None:
+        return None
+    matches = CREATED_PROPERTY.findall(frontmatter.group("body"))
+    if len(matches) > 1:
+        raise ValueError("generated catalogue must contain at most one Created property")
+    if not matches:
+        return None
+    return validate_created_on(matches[0])
+
+
+def remove_created_property(note: str) -> str:
+    """Remove the non-authoritative creation property from YAML frontmatter."""
+    frontmatter = FRONTMATTER.match(note)
+    if frontmatter is None:
+        return note
+    body = frontmatter.group("body")
+    created = CREATED_PROPERTY.search(body)
+    if created is None:
+        return note
+    created_start, created_end = created.span()
+    if created_end < len(body) and body[created_end] == "\n":
+        created_end += 1
+    elif created_start > 0 and body[created_start - 1] == "\n":
+        created_start -= 1
+    cleaned = body[:created_start] + body[created_end:]
+    start, end = frontmatter.span("body")
+    return note[:start] + cleaned + note[end:]
 
 
 def digest_rows(rows: list[dict], keys: tuple[str, ...]) -> list[dict]:
@@ -289,7 +341,9 @@ def write_output_atomic_unlocked(output: Path, note: str) -> None:
         if existing_markers:
             if len(existing_markers) != 1 or existing_markers[0] != owner:
                 raise ValueError("catalogue output belongs to a different inventory owner")
-        elif existing_bytes != remove_owner_marker(note).encode("utf-8"):
+        elif remove_created_property(existing) != remove_created_property(
+            remove_owner_marker(note)
+        ):
             raise ValueError(
                 "refusing to replace an unowned catalogue that is not an exact legacy render"
             )
@@ -697,6 +751,7 @@ def render(
     torque_paths: list[dict],
     owner: str,
     scope: str = "personal",
+    created_on: str | None = None,
 ) -> str:
     include_private_details = scope == "private"
     digest = catalogue_digest(
@@ -756,6 +811,7 @@ def render(
         if include_private_details
         else ""
     )
+    created_property = f"Created: {created_on}\n" if created_on is not None else ""
     return f'''---
 type: "[[Reference Category]]"
 subtype: inventory
@@ -765,7 +821,7 @@ tags:
   - inventory
   - property
   - equipment
----
+{created_property}---
 
 # Property Inventory Catalogue
 
@@ -1318,6 +1374,7 @@ def main() -> None:
     parser.add_argument("--scope", choices=("public", "personal", "private"), default="personal")
     parser.add_argument("--installation-id")
     parser.add_argument("--owner-digest")
+    parser.add_argument("--created-on")
     args = parser.parse_args()
     scope_rank = SCOPE_MAX_SENSITIVITY[args.scope]
 
@@ -1447,7 +1504,22 @@ def main() -> None:
     )
     con.close()
 
-    note = render(inventory, states, relationships, kits, torque_paths, owner, args.scope)
+    if args.created_on is not None:
+        created_on = validate_created_on(args.created_on)
+    elif args.output.exists():
+        created_on = catalogue_created_on(args.output.read_text())
+    else:
+        created_on = None
+    note = render(
+        inventory,
+        states,
+        relationships,
+        kits,
+        torque_paths,
+        owner,
+        args.scope,
+        created_on or date.today().isoformat(),
+    )
     write_output_atomic(args.output, note)
     print(f"rendered={args.output}")
     print(f"scope={args.scope}")

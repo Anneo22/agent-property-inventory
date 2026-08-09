@@ -26,6 +26,7 @@ try:
         load_store_current,
         semantic_failures,
     )
+    from .render import catalogue_created_on
 except ImportError:  # Direct execution during local development.
     from rebuild import (
         EVENT_CLAIM_REQUIREMENTS,
@@ -37,6 +38,7 @@ except ImportError:  # Direct execution during local development.
         load_store_current,
         semantic_failures,
     )
+    from render import catalogue_created_on
 
 HERE = Path(__file__).resolve().parent
 
@@ -922,6 +924,12 @@ def main() -> None:
                 if len(owner_matches) == 1
                 else ()
             )
+        created_on = catalogue_created_on(
+            args.markdown.read_text() if args.markdown.exists() else ""
+        )
+        created_arguments = (
+            ("--created-on", created_on) if created_on is not None else ()
+        )
         rendered = subprocess.run(
             [
                 sys.executable,
@@ -933,6 +941,7 @@ def main() -> None:
                 "--scope",
                 args.catalogue_scope,
                 *owner_arguments,
+                *created_arguments,
             ],
             text=True,
             capture_output=True,

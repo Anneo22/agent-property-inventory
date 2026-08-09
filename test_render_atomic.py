@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from copy import deepcopy
+from datetime import date
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -205,7 +206,12 @@ class RenderScopeAndAtomicWriteTest(unittest.TestCase):
                 ],
             )
 
-    def render(self, scope: str, *, environment: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    def render(
+        self,
+        scope: str,
+        *arguments: str,
+        environment: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
                 sys.executable,
@@ -216,6 +222,7 @@ class RenderScopeAndAtomicWriteTest(unittest.TestCase):
                 str(self.output),
                 "--scope",
                 scope,
+                *arguments,
             ],
             text=True,
             capture_output=True,
@@ -524,6 +531,33 @@ class RenderScopeAndAtomicWriteTest(unittest.TestCase):
         self.assertEqual(self.output.read_bytes(), original)
         self.assertEqual(list(self.root.glob(f".{self.output.name}.tmp-*")), [])
 
+    def test_render_preserves_created_property_and_is_idempotent(self) -> None:
+        first = self.render("private")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        initial = self.output.read_text()
+        self.assertIn(f"Created: {date.today().isoformat()}\n", initial)
+
+        historical = initial.replace(
+            f"Created: {date.today().isoformat()}\n",
+            "Created: 2020-01-02\n",
+        )
+        self.output.write_text(historical)
+        second = self.render("private")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(self.output.read_text(), historical)
+        third = self.render("private")
+        self.assertEqual(third.returncode, 0, third.stderr)
+        self.assertEqual(self.output.read_text(), historical)
+
+    def test_explicit_created_property_requires_a_valid_iso_date(self) -> None:
+        for invalid in ("", "not-a-date", "2026-02-30"):
+            with self.subTest(invalid=invalid):
+                self.output.unlink(missing_ok=True)
+                failed = self.render("private", "--created-on", invalid)
+                self.assertNotEqual(failed.returncode, 0)
+                self.assertIn("must be an ISO date", failed.stderr)
+                self.assertFalse(self.output.exists())
+
     def test_catalogue_owner_rejects_another_inventory_and_adopts_exact_legacy(self) -> None:
         first = self.render("private")
         self.assertEqual(first.returncode, 0, first.stderr)
@@ -554,6 +588,25 @@ class RenderScopeAndAtomicWriteTest(unittest.TestCase):
             owner_a_note,
             flags=re.MULTILINE,
         )
+        created = re.search(r"^Created: (\d{4}-\d{2}-\d{2})$", legacy_note, re.MULTILINE)
+        self.assertIsNotNone(created)
+        legacy_without_created = re.sub(
+            r"^Created: \d{4}-\d{2}-\d{2}\n",
+            "",
+            legacy_note,
+            flags=re.MULTILINE,
+        )
+        relocated = legacy_without_created.replace(
+            "# Property Inventory Catalogue\n",
+            f"# Property Inventory Catalogue\n\nCreated: {created.group(1)}\n",
+        )
+        self.output.write_text(relocated)
+        rejected = self.render("private")
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("not an exact legacy render", rejected.stderr)
+        self.assertEqual(self.output.read_text(), relocated)
+
+        legacy_note = legacy_without_created
         self.output.write_text(legacy_note)
         adopted = self.render("private")
         self.assertEqual(adopted.returncode, 0, adopted.stderr)
