@@ -4,24 +4,21 @@
 
 `agent-property-inventory` is a local JSONL ledger that lets agents answer what you own, where it is, and what it works with.
 
-One bike-parts session removed four of seven items from my cart because the inventory showed that I already owned the equivalents. It also exposed the opposite failure: an expensive wheelset was missing while a sold one was still recorded as owned. Agents need a reliable record of the physical world before they can give useful advice about it.
+![A real inventory query finds one physically checked item, then the complete verifier passes with zero failures](docs/assets/property-inventory-demo.gif)
 
-## What it keeps straight
+Agents query before buying or advising. Facts enter through one verified local writer.
 
-- A product model is different from the physical unit you own.
-- A purchase is different from current possession.
-- Similar purpose is different from verified interface compatibility.
-- Unknown is a real state. An empty search never proves absence.
-- Photos, receipts, serials, locations, conditions, and measurements keep their evidence and history.
+## What it knows
 
-The canonical store is `Data/store/*.jsonl`. SQLite and Markdown are rebuilt projections. Runtime state, backups, media, and canonical data stay outside Obsidian; only the generated catalogue belongs in the vault.
+![Identity, possession, and compatibility remain unknown until their specific evidence is recorded](docs/assets/evidence-model.svg)
 
-```text
-inventory-root/Data/store/*.jsonl   canonical ledger
-media-root/sha256/...               immutable evidence files
-runtime-root/                       SQLite, backups and proposals
-notes-root/Inventory.md             generated catalogue
-```
+The ledger preserves photos, receipts, serials, locations, condition, measurements, lifecycle history, and unknowns. An empty search means “not recorded,” never “does not exist.”
+
+## How it works
+
+![Agents may read and prepare freely, while only one locked and fully verified path can replace canonical JSONL](docs/assets/trusted-path.svg)
+
+`Data/store/*.jsonl` is the sole source of truth. Immutable media, runtime databases, and backups stay outside Obsidian. SQLite and `Inventory.md` are disposable rebuilt views.
 
 ## Quick start
 
@@ -70,7 +67,7 @@ property-inventory physical-check \
   --condition working
 ```
 
-The CLI also records plans, orders, deliveries, moves, loans, sales, corrections, evidence, kits, maintenance, insurance readiness, measured spaces, and offline replica proposals. Run `property-inventory --help` for the command surface and use the [operations guide](docs/operations.md) for the rules behind lifecycle changes and recovery.
+The CLI also records plans, orders, deliveries, moves, loans, sales, corrections, evidence, kits, maintenance, insurance readiness, measured spaces, and offline replica proposals. Run `property-inventory --help` for the complete command surface.
 
 ## Connect an agent
 
@@ -90,13 +87,7 @@ The MCP server is a local stdio process. Its default read profile can search, in
 
 The private write profile may prepare bounded proposals, capture reviews, and replica plans. It cannot apply them or invoke direct lifecycle mutations. See [MCP profiles](docs/mcp.md).
 
-## Reliability boundaries
-
-Every canonical mutation acquires the single-writer lock, creates a verified backup, stages the next generation, rebuilds the projections, renders the catalogue, runs semantic verification, and checks foreign keys before replacing live data.
-
-A passive photo, cart, order, receipt, or purchase history does not prove current possession. Physical verification requires explicit current evidence. Compatibility becomes definitive only from explicit evidence or matching normalized interfaces. Capture and imports produce reviewable proposals rather than silently creating facts.
-
-## Current limits
+## Deliberate limits
 
 There is no web or phone interface, hosted sync service, bundled recognition model, insurer integration, or proof of broad real-world adoption. Spatial packing is a deterministic measured-box heuristic, not an optimal organizer. Local capture adapters are trusted programs and still require explicit review.
 
@@ -115,6 +106,8 @@ There is no web or phone interface, hosted sync service, bundled recognition mod
 ruff check .
 python3 -m compileall -q src property_inventory.py rebuild_inventory_sqlite.py render_inventory.py verify_inventory.py
 python3 -m unittest discover -v -s tests -p 'test_*.py'
+vhs docs/assets/demo.tape
+python3 scripts/check-readme-visuals.py
 scripts/check-public-leaks.sh
 ```
 

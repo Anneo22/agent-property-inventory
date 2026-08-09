@@ -61,7 +61,24 @@ while IFS= read -r revision; do
 
     while IFS= read -r tracked_path; do
         case "$tracked_path" in
-            .gitignore|LICENSE|*.csv|*.geojson|*.json|*.jsonl|*.lock|*.md|*.py|*.sh|*.sql|*.toml|*.yaml|*.yml)
+            docs/assets/property-inventory-demo.gif)
+                if ! git cat-file blob "$revision:$tracked_path" | python3 -c '
+import struct
+import sys
+
+payload = sys.stdin.buffer.read()
+if len(payload) > 2_000_000 or payload[:6] not in {b"GIF87a", b"GIF89a"}:
+    raise SystemExit(1)
+if len(payload) < 10 or struct.unpack("<HH", payload[6:10]) != (960, 560):
+    raise SystemExit(1)
+'; then
+                    echo "$revision:$tracked_path"
+                    echo "The approved README GIF has an unexpected format, size, or dimensions." >&2
+                    exit 1
+                fi
+                continue
+                ;;
+            .gitignore|LICENSE|docs/assets/demo-search.jq|docs/assets/demo-status.jq|docs/assets/demo.tape|*.csv|*.geojson|*.json|*.jsonl|*.lock|*.md|*.py|*.sh|*.sql|*.svg|*.toml|*.yaml|*.yml)
                 ;;
             *)
                 echo "$revision:$tracked_path"
