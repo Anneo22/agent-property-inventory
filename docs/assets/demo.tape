@@ -40,26 +40,22 @@ Show
 Sleep 500ms
 
 Hide
-Copy "property-inventory "
-Paste
+Type "property-inventory "
 Sleep 200ms
 Show
 Sleep 300ms
 Hide
-Copy "search "
-Paste
+Type "search "
 Sleep 200ms
 Show
 Sleep 300ms
 Hide
-Copy "'T25' "
-Paste
+Type "'T25' "
 Sleep 200ms
 Show
 Sleep 300ms
 Hide
-Copy "--summary"
-Paste Enter
+Type "--summary" Enter
 Sleep 3s
 Show
 Sleep 5s

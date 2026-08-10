@@ -67,12 +67,17 @@ def main() -> None:
         '"cursor": "#101216"',
         '"cursorAccent": "#101216"',
         'Type "clear" Enter',
-        'Copy "property-inventory "',
-        'Copy "search "',
-        'Copy "\'T25\' "',
-        'Copy "--summary"',
+        'Type "property-inventory "',
+        'Type "search "',
+        'Type "\'T25\' "',
+        'Type "--summary" Enter',
     )
-    if source.count(OUTPUT) != 1 or any(value not in source for value in required):
+    if (
+        source.count(OUTPUT) != 1
+        or any(value not in source for value in required)
+        or "\nCopy " in source
+        or "\nPaste" in source
+    ):
         raise SystemExit("README GIF tape no longer satisfies the release contract")
 
     committed_shape = validate_gif(GIF)
