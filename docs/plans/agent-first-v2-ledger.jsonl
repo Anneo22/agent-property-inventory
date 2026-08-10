@@ -1,0 +1,10 @@
+{"batch":1,"name":"persist-plan","status":"done","verify":"plan and ledger parse; v1 baseline green; commit and push"}
+{"batch":2,"name":"package-core","status":"done","verify":"source checkout, editable install and wheel expose equivalent CLI behaviour"}
+{"batch":3,"name":"transaction-lifecycle","status":"done","verify":"crash, competing-writer, recovery and illegal-transition tests pass"}
+{"batch":4,"name":"schema-scopes","status":"done","verify":"v1 and v2 migrate to v3 without data loss; future schema fails closed; scoped reads redact correctly"}
+{"batch":5,"name":"media-export","status":"done","verify":"media integrity failures are detected; blank restore is identity and hash equivalent"}
+{"batch":6,"name":"compatibility-proposals","status":"done","verify":"typed outcomes are evidence-safe; invalid and stale proposals preserve every canonical byte; post-commit crash recovery uses a canonical receipt"}
+{"batch":7,"name":"mcp","status":"done","verify":"real stdio read profile has no mutation tool; private write profile prepares and applies only through the transaction core"}
+{"batch":8,"name":"private-migration","status":"done","verify":"named live backup exists; schema v3, representative CLI and stdio MCP queries, renderer, verifier and foreign keys pass"}
+{"batch":9,"name":"review-release","status":"done","verify":"44-test source suite, clean Python 3.11 wheel install, real stdio MCP, public-boundary scan, six-cell CI matrix, documentation links and independent adversarial review pass; no public release made"}
+{"batch":10,"name":"superseded","status":"done","verify":"historical v2/v3 evidence retained; current schema-v6, eight-cell CI, live migration, and public-release acceptance are tracked only in roadmap-completion-ledger.jsonl"}

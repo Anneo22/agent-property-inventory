@@ -6,15 +6,19 @@
 
 Agents query it before buying, repairing, moving, organizing, or preparing an insurance record.
 
-I built it as a bridge between agents and a person's physical world. The program stays small: structured local data, a CLI and an MCP server, with the agent doing the hard work.
+![A physical object becomes an evidence-backed record that an agent can use before acting](docs/assets/physical-memory.gif)
 
-![A live query finds a physically checked tool, while a second query refuses to invent an unrecorded repair kit](docs/assets/property-inventory-demo.gif)
+The record keeps an object's evidence, location, condition and interfaces together.
 
-## What one record unlocks
+## Ask before you act
 
-![Physical checks and documents become one evidence-backed local record that agents can use for purchases, repairs, moves, organization, and insurance](docs/assets/physical-world.svg)
+![An agent asks whether a T25 bit is already owned and gets an evidence-backed location](docs/assets/ask-before-acting.png)
 
-Each item keeps identity, possession, location, condition, interfaces, dimensions, history, and evidence together. No match means "not recorded," never "does not exist."
+No match means "not recorded," never "does not exist."
+
+## The larger idea
+
+![Objects across physical spaces become one queryable context for packing, repair, and insurance preparation](docs/assets/physical-world-map.png)
 
 Today it supports physical checks, lifecycle history, compatibility, task kits, torque limits, spaces, packing, maintenance, insurance readiness, floor plans, and reviewed photo proposals. It has no recognition model, app, hosted sync, or insurer integration.
 

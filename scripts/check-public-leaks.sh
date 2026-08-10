@@ -61,15 +61,15 @@ while IFS= read -r revision; do
 
     while IFS= read -r tracked_path; do
         case "$tracked_path" in
-            docs/assets/property-inventory-demo.gif)
+            docs/assets/property-inventory-demo.gif|docs/assets/physical-memory.gif)
                 if ! git cat-file blob "$revision:$tracked_path" | python3 -c '
 import struct
 import sys
 
 payload = sys.stdin.buffer.read()
-if len(payload) > 2_000_000 or payload[:6] not in {b"GIF87a", b"GIF89a"}:
+if len(payload) > 5_000_000 or payload[:6] not in {b"GIF87a", b"GIF89a"}:
     raise SystemExit(1)
-if len(payload) < 10 or struct.unpack("<HH", payload[6:10]) not in {(960, 560), (960, 520)}:
+if len(payload) < 10 or struct.unpack("<HH", payload[6:10]) not in {(960, 560), (960, 520), (1440, 720)}:
     raise SystemExit(1)
 '; then
                     echo "$revision:$tracked_path"
@@ -78,7 +78,40 @@ if len(payload) < 10 or struct.unpack("<HH", payload[6:10]) not in {(960, 560), 
                 fi
                 continue
                 ;;
-            .gitignore|LICENSE|docs/assets/demo-search.jq|docs/assets/demo-status.jq|docs/assets/demo.tape|*.csv|*.geojson|*.json|*.jsonl|*.lock|*.md|*.py|*.sh|*.sql|*.svg|*.toml|*.yaml|*.yml)
+            *.png)
+                if ! git cat-file blob "$revision:$tracked_path" | python3 -c '
+import struct
+import sys
+
+payload = sys.stdin.buffer.read()
+if len(payload) > 3_000_000 or payload[:8] != b"\x89PNG\r\n\x1a\n":
+    raise SystemExit(1)
+if len(payload) < 24 or payload[12:16] != b"IHDR":
+    raise SystemExit(1)
+if struct.unpack(">II", payload[16:24]) not in {(1440, 720), (1536, 1024)}:
+    raise SystemExit(1)
+'; then
+                    echo "$revision:$tracked_path"
+                    echo "A README PNG has an unexpected format, size, or dimensions." >&2
+                    exit 1
+                fi
+                continue
+                ;;
+            *.ttf)
+                if ! git cat-file blob "$revision:$tracked_path" | python3 -c '
+import sys
+
+payload = sys.stdin.buffer.read()
+if len(payload) > 500_000 or payload[:4] not in {b"\x00\x01\x00\x00", b"OTTO"}:
+    raise SystemExit(1)
+'; then
+                    echo "$revision:$tracked_path"
+                    echo "A bundled font has an unexpected format or size." >&2
+                    exit 1
+                fi
+                continue
+                ;;
+            .gitignore|LICENSE|docs/assets/demo-search.jq|docs/assets/demo-status.jq|docs/assets/demo.tape|*.csv|*.geojson|*.json|*.jsonl|*.lock|*.md|*.py|*.sh|*.sql|*.svg|*.toml|*.txt|*.yaml|*.yml)
                 ;;
             *)
                 echo "$revision:$tracked_path"
