@@ -34,6 +34,10 @@ jobs:
       - name: Compile
         run: python -m compileall -q src property_inventory.py rebuild_inventory_sqlite.py render_inventory.py verify_inventory.py
 
+      - name: Regenerate and verify README visuals on macOS
+        if: runner.os == 'macOS' && matrix.python == '3.14'
+        run: python scripts/check-readme-visuals.py
+
       - name: Run acceptance suite
         run: python -m unittest discover -v -s tests -p 'test_*.py'
 

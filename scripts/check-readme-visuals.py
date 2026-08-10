@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Fail when README visuals or their reproducible sources drift."""
+"""Fail when README visuals or their reproducible sources drift.
+
+Linux is the canonical raster platform because FreeType output differs by OS.
+Every platform reruns the real CLI scenario and checks geometry and timing; Linux
+also requires decoded pixel identity.
+"""
 
 import subprocess
 import sys
@@ -36,12 +41,17 @@ def frame_durations(image: Image.Image) -> list[int | None]:
     return durations
 
 
-def check_same_pixels(expected_path: Path, actual_path: Path) -> None:
+def check_same_structure(expected_path: Path, actual_path: Path) -> None:
     with Image.open(expected_path) as expected, Image.open(actual_path) as actual:
         if expected.size != actual.size or expected.n_frames != actual.n_frames:
             raise SystemExit(f"{expected_path.name}: regenerated dimensions or frames differ")
         if frame_durations(expected) != frame_durations(actual):
             raise SystemExit(f"{expected_path.name}: regenerated timing differs")
+
+
+def check_same_pixels(expected_path: Path, actual_path: Path) -> None:
+    check_same_structure(expected_path, actual_path)
+    with Image.open(expected_path) as expected, Image.open(actual_path) as actual:
         for frame in range(expected.n_frames):
             expected.seek(frame)
             actual.seek(frame)
@@ -57,7 +67,12 @@ def check_reproduction() -> None:
             check=True,
         )
         for name in EXPECTED_VISUALS:
-            check_same_pixels(ASSETS / name, Path(temporary) / name)
+            expected = ASSETS / name
+            actual = Path(temporary) / name
+            if sys.platform == "linux":
+                check_same_pixels(expected, actual)
+            else:
+                check_same_structure(expected, actual)
 
 
 def main() -> None:

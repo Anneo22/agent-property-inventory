@@ -12,4 +12,4 @@ The README explains the product through one physical object, not software chrome
 
 ## Assets
 
-`docs/assets/workshop-specimen.png` is a synthetic source image. `scripts/render_readme_visuals.py` combines it with a bundled, licensed typeface and real CLI results to regenerate all three README visuals. `scripts/check-readme-visuals.py` compares every decoded pixel and animation duration against the committed outputs.
+`docs/assets/workshop-specimen.png` is a synthetic source image. `scripts/render_readme_visuals.py` combines it with a bundled, licensed typeface and real CLI results to regenerate all three README visuals. Linux is the canonical raster platform because FreeType produces different pixels across operating systems. Every platform reruns the CLI scenario and verifies dimensions and timing; Linux also compares every decoded pixel against the committed outputs.
