@@ -2,33 +2,95 @@
 
 [![Checks](https://github.com/Anneo22/agent-property-inventory/actions/workflows/checks.yml/badge.svg)](https://github.com/Anneo22/agent-property-inventory/actions/workflows/checks.yml)
 
-`agent-property-inventory` gives local AI agents a reliable record of what you physically own, where it is, and what it works with.
+`agent-property-inventory` is a local evidence ledger for physical possessions, exposed through a CLI and an MCP server for AI agents.
 
-Agents query it before buying, repairing, moving, organizing, or preparing an insurance record.
+It records individual objects, where they are, their condition, the interfaces they use, and the evidence behind each claim. It is built for questions such as "Do I already own a T25 bit?", "Will this adapter fit?", and "What should go in this moving box?"
 
-![A physical object becomes an evidence-backed record that an agent can use before acting](docs/assets/physical-memory.gif)
+I built it because I wanted a durable way to record and query what I physically own, and to stop buying duplicates.
 
-The record keeps an object's evidence, location, condition and interfaces together.
+## See it answer a real question
 
-## Ask before you act
+This exact block is reproduced from a temporary inventory by [`check-readme-example.py`](scripts/check-readme-example.py), which the [CI workflow](.github/workflows/checks.yml) runs against the real CLI.
 
-![An agent asks whether a T25 bit is already owned and gets an evidence-backed location](docs/assets/ask-before-acting.png)
+<!-- readme-example:start -->
+```console
+$ property-inventory search "T25" --summary
+{
+  "matching_record_found": true,
+  "count": 1,
+  "matches": [
+    {
+      "name": "T25 Torx bit",
+      "ownership": "confirmed",
+      "condition": "working",
+      "location": "Tool drawer",
+      "last_physical_check_on": "2026-08-09",
+      "evidence_types": [
+        "physical_check"
+      ]
+    }
+  ],
+  "next_cursor": null,
+  "page_count": 1,
+  "truncated": false
+}
+```
+<!-- readme-example:end -->
 
-No match means "not recorded," never "does not exist."
+The item is a distinct physical unit, current possession was confirmed in person, its condition is working, and its last known location is the tool drawer. A search with no match returns `unknown, not absent`; it never turns a missing record into a claim that you do not own something.
 
-## The larger idea
+## What you can ask
 
-![Objects across physical spaces become one queryable context for packing, repair, and insurance preparation](docs/assets/physical-world-map.png)
+| Command | Question |
+|---|---|
+| `search` | Do I already own this, and where is it? |
+| `context` | What recorded items are relevant to this repair or task? |
+| `compatibility` | Do these two exact items have matching interfaces? |
+| `kit-status` / `torque-check` | Is this tool setup complete and within its recorded limits? |
+| `fit` / `pack` / `free-volume` | Will measured items fit in this checked container? |
+| `insurance-status` | Which owned items have enough evidence, and what is missing? |
 
-Today it supports physical checks, lifecycle history, compatibility, task kits, torque limits, spaces, packing, maintenance, insurance readiness, floor plans, and reviewed photo proposals. It has no recognition model, app, hosted sync, or insurer integration.
+The same queries are available to agents through the local stdio MCP server.
 
-## Why agents can trust it
+## How it works
 
-- **Evidence has a type.** A receipt proves a purchase. Possession needs a current check. Compatibility needs matching standards, sizes, and directions.
-- **Unknowns survive.** Missing serials, locations, measurements, and items stay unknown.
-- **One guarded path writes.** A change is locked, backed up, rebuilt, verified, and checked for broken links before it replaces the JSONL.
+1. **Capture a fact.** A person shows an object or checks a label, serial number, measurement, receipt, condition, or location. Every claim keeps its evidence.
+2. **Match before adding.** The agent searches the existing inventory first. A known unit is updated; a genuinely different physical unit gets a new record.
+3. **Commit through the CLI.** Canonical writes take one lock, create a backup, stage the complete change, rebuild the views, and run semantic and foreign-key checks. The live JSONL changes only after every check passes.
+4. **Query through the CLI or MCP.** Reads use the same schema and scope rules. Read-profile MCP tools query the inventory. Write-profile tools prepare a proposal for review; the separate CLI command `proposal-apply` commits it.
 
-`Data/store/*.jsonl` is the source of truth. SQLite and `Inventory.md` are rebuilt views.
+The canonical write path is:
+
+```text
+lock -> backup -> stage -> rebuild -> render -> verify -> replace
+```
+
+`Data/store/*.jsonl` is the source of truth. SQLite and the Markdown catalogue are generated views and can be rebuilt.
+
+## What it refuses to guess
+
+| Input | Safe result |
+|---|---|
+| An item is in a shopping cart | `planned`, not ordered |
+| A receipt says an item was bought | Purchase evidence, not proof of current possession |
+| Two tools serve a similar purpose | Compatibility stays unknown until their interfaces match |
+| A search returns no record | Unknown, not absent |
+| An expected item is missing from one room | Follow-up required, not sold, lost, or disposed |
+
+Unknown serial numbers, locations, measurements, quantities, and compatibility facts stay unknown.
+
+## Where the files live
+
+An installation keeps four paths separate:
+
+| Path | Contents |
+|---|---|
+| Inventory root | Canonical JSONL and ownership metadata |
+| Media root | Content-addressed photos, receipts, and other evidence |
+| Runtime directory | SQLite, locks, backups, journals, and pending proposals |
+| Catalogue output | A generated, scope-filtered Markdown view |
+
+The code can live anywhere. The private JSONL does not need to sit in an Obsidian vault.
 
 ## Quick start
 
@@ -48,23 +110,46 @@ export PROPERTY_INVENTORY_MEDIA_ROOT="$demo_root/media"
 export PROPERTY_INVENTORY_CATALOGUE_OUTPUT="$demo_root/notes/Inventory.md"
 
 property-inventory init
-property-inventory status
+property-inventory status --summary
 ```
 
-`status` rebuilds the views and runs every integrity check.
+`status` rebuilds every generated view and runs the full integrity gate. Run `property-inventory --help` for the complete command surface.
 
-## Use it
+## Record the first item
 
+For a direct check, the CLI caller supplies what was physically observed. A person or an agent acting on explicit observations runs `discover` to record the physical check, current possession, condition, quantity, and location in one verified transaction:
+
+<!-- readme-capture:start -->
 ```bash
-property-inventory search "hex bit" --condition working --summary
-property-inventory context --task "repair a bicycle tyre"
-```
+property-inventory add-location \
+  --location-id loc-tool-drawer \
+  --name "Tool drawer" \
+  --kind container
 
-The CLI also records checks, orders, deliveries, moves, loans, sales, returns, evidence, maintenance, and offline proposals. Run `property-inventory --help` for every command.
+property-inventory discover \
+  --actor "Owner" \
+  --source-ref "Checked in person" \
+  --name "T25 Torx bit" \
+  --category tool \
+  --checked-on "$(date +%F)" \
+  --location-id loc-tool-drawer \
+  --new-model \
+  --new-unit \
+  --brand Wera \
+  --model T25 \
+  --quantity 1 \
+  --unit piece \
+  --condition working
+
+property-inventory search "T25" --summary
+```
+<!-- readme-capture:end -->
+
+For an item that may already exist, search first and use `--existing-model-id` or `--existing-item-id`. `--new-unit` is an explicit assertion that this is a different physical object.
 
 ## Connect an agent
 
-The MCP server exposes inventory queries as local tools an agent can call over stdio.
+The MCP server runs locally over stdio. This example gives an agent read-only access to personal-scope data:
 
 ```json
 {
@@ -78,7 +163,22 @@ The MCP server exposes inventory queries as local tools an agent can call over s
 }
 ```
 
-The instance selects an inventory, the scope filters visible data, and the profile controls tools. Read mode cannot write; private tools prepare proposals for reviewed CLI application. See [MCP profiles](docs/mcp.md).
+Write-profile MCP tools can create a proposal in private scope, but they cannot change canonical JSONL. The CLI caller decides what becomes fact: inspect the returned ID with `property-inventory proposal-show <proposal-id>`, check the proposed identity, quantity, condition, location, and evidence, then commit it with `property-inventory proposal-apply <proposal-id>`.
+
+A photo follows the same boundary:
+
+```text
+photo -> prepare_overview_capture -> confirm or correct observations
+      -> review_overview_capture -> proposal-show -> proposal-apply
+```
+
+The agent passes a local image path and explicit crop regions to `prepare_overview_capture`. An optional adapter, selected from configuration fixed when the MCP server starts, can suggest regions and observations. Without an adapter, the caller supplies regions and manual observations. The tool stages the original and crops, then returns a digest plus any bounded suggestions and duplicate candidates. The caller confirms or corrects identity, quantity, condition, and location; `review_overview_capture` binds those decisions and the evidence to that exact image. Only the final CLI command changes the canonical inventory.
+
+The CLI is the write-authority boundary: any person or agent given local CLI and filesystem access can invoke a direct write or `proposal-apply`. Direct commands such as `discover` have no separate proposal review, but still pass the full integrity gate before commit. An agent given only MCP access cannot bypass the proposal gate. See [MCP profiles](docs/mcp.md) and [overview capture](docs/operations.md#overview-capture-and-insurance).
+
+## Current limits
+
+This is a local, single-user project. It has no graphical app, hosted service, built-in recognition model, or insurer integration. [Photo and barcode adapters](docs/operations.md#overview-capture-and-insurance) can propose observations, but nothing becomes an inventory fact until it is reviewed and committed through the CLI.
 
 ## Documentation
 

@@ -46,7 +46,7 @@ vault.
 12. **Release acceptance.**
     Verified by the named private v4-to-v6 migration and retained backups;
     post-migration rebuild, render, semantic and foreign-key checks; an
-    export-and-blank-restore doctor drill; live CLI and MCP probes; all 470
+    export-and-blank-restore doctor drill; live CLI and MCP probes; all 471
     source tests; clean sdist and wheel builds; the eight-cell public CI matrix;
     full-history boundary and secret scans; and independent adversarial review.
     The release boundary excludes private data, media, runtime state, and these

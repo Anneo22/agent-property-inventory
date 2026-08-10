@@ -34,10 +34,6 @@ jobs:
       - name: Compile
         run: python -m compileall -q src property_inventory.py rebuild_inventory_sqlite.py render_inventory.py verify_inventory.py
 
-      - name: Regenerate and verify README visuals on macOS
-        if: runner.os == 'macOS' && matrix.python == '3.14'
-        run: python scripts/check-readme-visuals.py
-
       - name: Run acceptance suite
         run: python -m unittest discover -v -s tests -p 'test_*.py'
 
@@ -74,11 +70,11 @@ jobs:
       - name: Check public boundary
         run: scripts/check-public-leaks.sh
 
-      - name: Install package for the README demo
+      - name: Install package for the README example
         run: python -m pip install -e .
 
-      - name: Regenerate and verify README visuals
-        run: python scripts/check-readme-visuals.py
+      - name: Check README CLI example
+        run: python scripts/check-readme-example.py
 
       - name: Build wheel
         run: python -m pip wheel --no-deps --wheel-dir dist .

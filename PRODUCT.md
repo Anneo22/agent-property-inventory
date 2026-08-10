@@ -16,7 +16,7 @@ The primary user is a person working through a local AI agent. The agent needs r
 
 ## Positioning
 
-The product is a bridge between an agent and one person's physical world: evidence-backed structured local data, exposed through a CLI and MCP, with the agent doing the capture and reasoning work. It is not an inventory app or hosted service.
+The product is structured local data for one person's physical possessions, exposed through a CLI and MCP. The agent handles capture and reasoning. There is no inventory app or hosted service.
 
 ## Operating Context
 
@@ -33,12 +33,12 @@ People show or explicitly check physical objects, containers, documents, labels,
 
 ## Brand Commitments
 
-The public name is `agent-property-inventory`. The voice is plain, exact, compact, and skeptical of unsupported claims. Visual explanations must be object-led, low-copy, and understandable without reading architecture documentation.
+The public name is `agent-property-inventory`. The voice is plain, exact, compact, and skeptical of unsupported claims. The README leads with checked CLI behavior and uses no decorative product art.
 
 ## Evidence on Hand
 
 - The repository's CLI and MCP implementation, test suite, and release workflow.
-- A deterministic synthetic physical-check scenario for a 1/4-inch hex-bit set in a tool drawer.
+- A deterministic synthetic physical-check scenario for a T25 Torx bit in a tool drawer.
 - No public customer claims, benchmarks, private inventory media, or real household floor plan may be fabricated or exposed.
 
 ## Product Principles
@@ -51,4 +51,4 @@ The public name is `agent-property-inventory`. The voice is plain, exact, compac
 
 ## Accessibility & Inclusion
 
-Public visuals must remain understandable without animation, avoid color-only meaning, and include descriptive alternative text.
+The public explanation uses text, tables, and copyable terminal output. Meaning never depends on animation or color.

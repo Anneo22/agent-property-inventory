@@ -124,17 +124,12 @@ class PublicReleaseHygieneTests(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("unexpected format, size, or dimensions", completed.stderr)
 
-    def test_readme_visuals_are_regenerated_on_linux_and_macos(self) -> None:
+    def test_readme_cli_example_is_checked_by_the_linux_audit_job(self) -> None:
         workflow = CHECKS_WORKFLOW.read_text(encoding="utf-8")
-        test_job, audit_job = workflow.split("\n  audit:\n", maxsplit=1)
-        command = "run: python scripts/check-readme-visuals.py"
+        _, audit_job = workflow.split("\n  audit:\n", maxsplit=1)
 
-        self.assertIn("os: [ubuntu-latest, macos-latest]", test_job)
-        self.assertIn('python: ["3.11", "3.12", "3.13", "3.14"]', test_job)
-        self.assertEqual(test_job.count(command), 1)
-        self.assertIn("if: runner.os == 'macOS' && matrix.python == '3.14'", test_job)
         self.assertIn("runs-on: ubuntu-latest", audit_job)
-        self.assertEqual(audit_job.count(command), 1)
+        self.assertEqual(audit_job.count("run: python scripts/check-readme-example.py"), 1)
 
 
 if __name__ == "__main__":
