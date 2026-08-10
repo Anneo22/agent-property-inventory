@@ -159,7 +159,13 @@ class PublicReleaseHygieneTests(unittest.TestCase):
         self.assertIn("runs-on: ubuntu-latest", audit_job)
         self.assertEqual(audit_job.count("run: python scripts/check-readme-example.py"), 1)
         self.assertEqual(audit_job.count("run: python scripts/check-readme-gif.py"), 1)
-        self.assertIn("version: v0.11.0", audit_job)
+        self.assertNotIn("charmbracelet/vhs-action@", audit_job)
+        self.assertIn("VHS_VERSION: 0.11.0", audit_job)
+        self.assertIn(
+            "VHS_SHA256: 99cb634587eaae0473c1ea377db80c3a048c27f99fe0a7febb1a1e8cb7ee5009",
+            audit_job,
+        )
+        self.assertIn("sha256sum --check -", audit_job)
 
 
 if __name__ == "__main__":
