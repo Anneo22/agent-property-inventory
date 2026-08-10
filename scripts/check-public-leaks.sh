@@ -69,7 +69,7 @@ import sys
 payload = sys.stdin.buffer.read()
 if len(payload) > 2_000_000 or payload[:6] not in {b"GIF87a", b"GIF89a"}:
     raise SystemExit(1)
-if len(payload) < 10 or struct.unpack("<HH", payload[6:10]) != (960, 560):
+if len(payload) < 10 or struct.unpack("<HH", payload[6:10]) not in {(960, 560), (960, 520)}:
     raise SystemExit(1)
 '; then
                     echo "$revision:$tracked_path"

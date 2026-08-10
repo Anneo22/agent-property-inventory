@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600" role="img" aria-labelledby="title desc">
+  <title id="title">One evidence-backed local record gives agents useful physical context</title>
+  <desc id="desc">A person confirms physical checks, photos, receipts, serials, measurements, and spaces. Software keeps each claim tied to a source and checks for broken links or conflicts. The implemented local inventory preserves identity, possession, location, condition, compatibility, dimensions, evidence, and unknowns. Agents can query it to inform purchases, repairs, organization, moves, and insurance records.</desc>
+  <defs>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .title { fill: #f0f6fc; font-size: 31px; font-weight: 700; }
+      .subtitle { fill: #c9d1d9; font-size: 17px; }
+      .eyebrow { fill: #8b949e; font-size: 13px; font-weight: 700; letter-spacing: 1.1px; }
+      .card-title { fill: #f0f6fc; font-size: 18px; font-weight: 700; }
+      .copy { fill: #c9d1d9; font-size: 15px; }
+      .center-title { fill: #f0f6fc; font-size: 23px; font-weight: 700; }
+      .center-copy { fill: #c9d1d9; font-size: 15px; }
+      .label-blue { fill: #58a6ff; font-size: 13px; font-weight: 700; letter-spacing: .8px; }
+      .label-green { fill: #7ee787; font-size: 13px; font-weight: 700; letter-spacing: .8px; }
+      .gate { fill: #f0f6fc; font-size: 13px; font-weight: 700; }
+      .gate-copy { fill: #c9d1d9; font-size: 12px; }
+    </style>
+  </defs>
+
+  <rect width="960" height="720" rx="24" fill="#0d1117"/>
+  <rect x="1" y="1" width="958" height="598" rx="23" fill="none" stroke="#30363d" stroke-width="2"/>
+
+  <text x="48" y="61" class="title">A local record gives AI agents physical context.</text>
+  <text x="48" y="93" class="subtitle">You confirm physical reality. Software only checks the record. Missing facts remain unknown.</text>
+
+  <text x="48" y="139" class="label-blue">EVIDENCE YOU RECORD</text>
+  <text x="374" y="139" class="eyebrow">ONE SOURCE OF TRUTH</text>
+  <text x="706" y="139" class="label-green">DECISIONS IT CAN INFORM</text>
+
+  <g transform="translate(48 163)">
+    <rect width="238" height="84" rx="14" fill="#161b22" stroke="#30363d" stroke-width="2"/>
+    <text x="20" y="34" class="card-title">Physical checks</text>
+    <text x="20" y="59" class="copy">possession, condition, location</text>
+  </g>
+  <g transform="translate(48 263)">
+    <rect width="238" height="84" rx="14" fill="#161b22" stroke="#30363d" stroke-width="2"/>
+    <text x="20" y="34" class="card-title">Photos and documents</text>
+    <text x="20" y="59" class="copy">receipts, manuals, appraisals</text>
+  </g>
+  <g transform="translate(48 363)">
+    <rect width="238" height="84" rx="14" fill="#161b22" stroke="#30363d" stroke-width="2"/>
+    <text x="20" y="34" class="card-title">Serials and measures</text>
+    <text x="20" y="59" class="copy">identity, interfaces, dimensions</text>
+  </g>
+  <g transform="translate(48 463)">
+    <rect width="238" height="84" rx="14" fill="#161b22" stroke="#30363d" stroke-width="2"/>
+    <text x="20" y="34" class="card-title">Rooms and containers</text>
+    <text x="20" y="59" class="copy">floor plans, spaces, nesting</text>
+  </g>
+
+  <path d="M286 135 H326" stroke="#58a6ff" stroke-width="4"/>
+  <path d="M326 123 L344 135 L326 147 Z" fill="#58a6ff"/>
+  <text x="248" y="112" class="label-blue">YOU CONFIRM</text>
+
+  <g transform="translate(350 163)">
+    <rect width="260" height="420" rx="20" fill="#13233a" stroke="#58a6ff" stroke-width="3"/>
+    <text x="26" y="48" class="eyebrow">IMPLEMENTED CORE</text>
+    <rect x="20" y="66" width="220" height="82" rx="10" fill="#0d1117" stroke="#58a6ff"/>
+    <text x="32" y="89" class="gate">INTEGRITY GATE</text>
+    <text x="32" y="109" class="gate-copy">Keeps each claim tied to a source</text>
+    <text x="32" y="130" class="gate-copy">Checks broken links + conflicts</text>
+    <text x="26" y="180" class="center-title">The record keeps</text>
+    <text x="26" y="211" class="center-copy">identity and current possession</text>
+    <text x="26" y="242" class="center-copy">location and condition</text>
+    <text x="26" y="273" class="center-copy">interfaces and dimensions</text>
+    <text x="26" y="304" class="center-copy">compatibility, evidence, history</text>
+    <line x1="26" y1="339" x2="234" y2="339" stroke="#30363d" stroke-width="2"/>
+    <text x="26" y="373" class="card-title">Unknown stays unknown</text>
+  </g>
+
+  <path d="M610 135 H650" stroke="#3fb950" stroke-width="4"/>
+  <path d="M650 123 L668 135 L650 147 Z" fill="#3fb950"/>
+  <text x="566" y="112" class="label-green">AI CAN USE CONTEXT</text>
+
+  <g transform="translate(674 163)">
+    <rect width="238" height="84" rx="14" fill="#13281b" stroke="#3fb950" stroke-width="2"/>
+    <text x="20" y="34" class="card-title">Purchase decisions</text>
+    <text x="20" y="59" class="copy">find equivalents, check fit first</text>
+  </g>
+  <g transform="translate(674 263)">
+    <rect width="238" height="84" rx="14" fill="#13281b" stroke="#3fb950" stroke-width="2"/>
+    <text x="20" y="34" class="card-title">Repair planning</text>
+    <text x="20" y="59" class="copy">tools, parts, limits, locations</text>
+  </g>
+  <g transform="translate(674 363)">
+    <rect width="238" height="84" rx="14" fill="#13281b" stroke="#3fb950" stroke-width="2"/>
+    <text x="20" y="34" class="card-title">Organization and moves</text>
+    <text x="20" y="59" class="copy">measure, pack, place, relocate</text>
+  </g>
+  <g transform="translate(674 463)">
+    <rect width="238" height="84" rx="14" fill="#13281b" stroke="#3fb950" stroke-width="2"/>
+    <text x="20" y="34" class="card-title">Insurance readiness</text>
+    <text x="20" y="59" class="copy">photos, values, receipts, gaps</text>
+  </g>
+
+</svg>

@@ -64,8 +64,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install audit and terminal-rendering dependencies
-        run: sudo apt-get update && sudo apt-get install --yes ffmpeg ripgrep ttyd
+      - name: Install audit dependencies
+        run: sudo apt-get update && sudo apt-get install --yes ripgrep
 
       - name: Check public boundary
         run: scripts/check-public-leaks.sh
@@ -73,18 +73,8 @@ jobs:
       - name: Install package for the README demo
         run: python -m pip install -e .
 
-      - name: Install pinned VHS release
-        run: |
-          curl -fsSLo /tmp/vhs.tar.gz https://github.com/charmbracelet/vhs/releases/download/v0.11.0/vhs_0.11.0_Linux_x86_64.tar.gz
-          echo "99cb634587eaae0473c1ea377db80c3a048c27f99fe0a7febb1a1e8cb7ee5009  /tmp/vhs.tar.gz" | sha256sum --check --strict
-          tar -xzf /tmp/vhs.tar.gz -C /tmp
-          sudo install -m 0755 /tmp/vhs_0.11.0_Linux_x86_64/vhs /usr/local/bin/vhs
-          vhs --version
-
       - name: Regenerate and verify README visuals
-        run: |
-          vhs docs/assets/demo.tape
-          python scripts/check-readme-visuals.py
+        run: python scripts/check-readme-visuals.py
 
       - name: Build wheel
         run: python -m pip wheel --no-deps --wheel-dir dist .

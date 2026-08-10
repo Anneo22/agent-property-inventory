@@ -10453,7 +10453,7 @@ def read_retrieval_store(args: argparse.Namespace) -> Store:
 
 
 def command_search(args: argparse.Namespace) -> dict:
-    return retrieve_search(
+    result = retrieve_search(
         read_retrieval_store(args),
         query=args.query,
         scope=args.scope,
@@ -10461,6 +10461,31 @@ def command_search(args: argparse.Namespace) -> dict:
         filters=retrieval_filters(args),
         cursor=args.cursor,
     )
+    if not args.summary:
+        return result
+    summary = {
+        "matching_record_found": result["recorded"],
+        "count": result["count"],
+        "matches": [
+            {
+                "name": match["model"]["name"],
+                "ownership": match["item"]["ownership_state"],
+                "condition": match["item"]["condition"],
+                "location": match["location"],
+                "last_physical_check_on": match["item"]["verified_on"],
+                "evidence_types": sorted(
+                    {evidence["evidence_type"] for evidence in match["evidence"]}
+                ),
+            }
+            for match in result["matches"]
+        ],
+        "next_cursor": result["next_cursor"],
+        "page_count": result["page_count"],
+        "truncated": result["truncated"],
+    }
+    if not result["recorded"]:
+        summary = {"meaning": result["meaning_if_empty"], **summary}
+    return summary
 
 
 def command_list_items(args: argparse.Namespace) -> dict:
@@ -10607,6 +10632,13 @@ def command_status(args: argparse.Namespace) -> dict:
         ):
             if args.scope == "private":
                 raise
+            if args.summary:
+                return {
+                    "integrity_gate": "unhealthy",
+                    "scope": args.scope,
+                    "verification_failures": None,
+                    "foreign_key_failures": None,
+                }
             return {
                 "status": "unhealthy",
                 "scope": args.scope,
@@ -10615,11 +10647,24 @@ def command_status(args: argparse.Namespace) -> dict:
             }
         result["recovery"] = recovery
         if args.scope != "private":
+            if args.summary:
+                return {
+                    "integrity_gate": result["status"],
+                    "scope": args.scope,
+                    "verification_failures": None,
+                    "foreign_key_failures": None,
+                }
             return {
                 "status": result["status"],
                 "scope": args.scope,
                 "store_valid": True,
                 "recovery": recovery,
+            }
+        if args.summary:
+            return {
+                "integrity_gate": result["status"],
+                "verification_failures": result["verification"]["failures"],
+                "foreign_key_failures": result["foreign_key_failures"],
             }
         return result
     finally:
@@ -13842,6 +13887,11 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser = subparsers.add_parser(
         "status", help="Rebuild and verify the current canonical store"
     )
+    status_parser.add_argument(
+        "--summary",
+        action="store_true",
+        help="Return the integrity-gate result; failure details stay hidden outside private scope",
+    )
     status_parser.set_defaults(function=command_status)
 
     maintenance_start_parser = subparsers.add_parser(
@@ -13937,6 +13987,11 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("query", nargs="+")
     search_parser.add_argument("--limit", type=int, default=50)
     search_parser.add_argument("--cursor")
+    search_parser.add_argument(
+        "--summary",
+        action="store_true",
+        help="Return names, ownership, condition, location, last physical-check date, evidence types, and empty-result meaning",
+    )
     add_retrieval_filters(search_parser)
     search_parser.set_defaults(function=command_search)
 

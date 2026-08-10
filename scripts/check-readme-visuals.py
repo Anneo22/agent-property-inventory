@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Fail when README visuals or their reproducible sources drift."""
 
+import subprocess
+import sys
+import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -9,11 +12,24 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 README = ROOT / "README.md"
 ASSETS = ROOT / "docs" / "assets"
+DEMO = ASSETS / "property-inventory-demo.gif"
+RENDERER = ROOT / "scripts" / "render_readme_demo.py"
 EXPECTED_LINKS = {
     "docs/assets/property-inventory-demo.gif",
-    "docs/assets/evidence-model.svg",
-    "docs/assets/trusted-path.svg",
+    "docs/assets/physical-world.svg",
 }
+
+
+def check_demo_reproduction() -> None:
+    with tempfile.TemporaryDirectory(prefix="property-inventory-visual-check-") as temporary:
+        rendered = Path(temporary) / DEMO.name
+        subprocess.run(
+            [sys.executable, str(RENDERER), "--output", str(rendered)],
+            cwd=ROOT,
+            check=True,
+        )
+        if rendered.read_bytes() != DEMO.read_bytes():
+            raise SystemExit(f"demo GIF is stale; run {RENDERER.relative_to(ROOT)}")
 
 
 def check_svg(path: Path, expected_size: tuple[int, int]) -> None:
@@ -38,18 +54,20 @@ def main() -> None:
         if readme.count(f"]({link})") != 1:
             raise SystemExit(f"README must reference {link} exactly once")
 
-    tape = (ASSETS / "demo.tape").read_text(encoding="utf-8")
-    if tape.count("Output docs/assets/property-inventory-demo.gif") != 1:
-        raise SystemExit("demo.tape must declare the README GIF output exactly once")
-
-    with Image.open(ASSETS / "property-inventory-demo.gif") as demo:
+    check_demo_reproduction()
+    with Image.open(DEMO) as demo:
         if demo.size != (960, 560):
             raise SystemExit(f"demo GIF: expected 960x560, got {demo.size}")
-        if getattr(demo, "n_frames", 1) < 100:
-            raise SystemExit("demo GIF has too few frames to demonstrate the CLI flow")
+        if getattr(demo, "n_frames", 1) != 3:
+            raise SystemExit("demo GIF must contain the known, unknown, and integrity scenes")
+        durations = []
+        for frame in range(demo.n_frames):
+            demo.seek(frame)
+            durations.append(demo.info.get("duration"))
+        if durations != [3500, 3500, 3500]:
+            raise SystemExit(f"demo GIF: unexpected frame durations {durations}")
 
-    check_svg(ASSETS / "trusted-path.svg", (960, 600))
-    check_svg(ASSETS / "evidence-model.svg", (960, 650))
+    check_svg(ASSETS / "physical-world.svg", (960, 600))
     print("README visuals: pass")
 
 

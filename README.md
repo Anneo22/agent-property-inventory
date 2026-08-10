@@ -2,23 +2,29 @@
 
 [![Checks](https://github.com/Anneo22/agent-property-inventory/actions/workflows/checks.yml/badge.svg)](https://github.com/Anneo22/agent-property-inventory/actions/workflows/checks.yml)
 
-`agent-property-inventory` is a local JSONL ledger that lets agents answer what you own, where it is, and what it works with.
+`agent-property-inventory` gives local AI agents a reliable record of what you physically own, where it is, and what it works with.
 
-![A real inventory query finds one physically checked item, then the complete verifier passes with zero failures](docs/assets/property-inventory-demo.gif)
+Agents query it before buying, repairing, moving, organizing, or preparing an insurance record.
 
-Agents query before buying or advising. Facts enter through one verified local writer.
+I built it as a bridge between agents and a person's physical world. The program stays small: structured local data, a CLI and an MCP server, with the agent doing the hard work.
 
-## What it knows
+![A live query finds a physically checked tool, while a second query refuses to invent an unrecorded repair kit](docs/assets/property-inventory-demo.gif)
 
-![Identity, possession, and compatibility remain unknown until their specific evidence is recorded](docs/assets/evidence-model.svg)
+## What one record unlocks
 
-The ledger preserves photos, receipts, serials, locations, condition, measurements, lifecycle history, and unknowns. An empty search means “not recorded,” never “does not exist.”
+![Physical checks and documents become one evidence-backed local record that agents can use for purchases, repairs, moves, organization, and insurance](docs/assets/physical-world.svg)
 
-## How it works
+Each item keeps identity, possession, location, condition, interfaces, dimensions, history, and evidence together. No match means "not recorded," never "does not exist."
 
-![Agents may read and prepare freely, while only one locked and fully verified path can replace canonical JSONL](docs/assets/trusted-path.svg)
+Today it supports physical checks, lifecycle history, compatibility, task kits, torque limits, spaces, packing, maintenance, insurance readiness, floor plans, and reviewed photo proposals. It has no recognition model, app, hosted sync, or insurer integration.
 
-`Data/store/*.jsonl` is the sole source of truth. Immutable media, runtime databases, and backups stay outside Obsidian. SQLite and `Inventory.md` are disposable rebuilt views.
+## Why agents can trust it
+
+- **Evidence has a type.** A receipt proves a purchase. Possession needs a current check. Compatibility needs matching standards, sizes, and directions.
+- **Unknowns survive.** Missing serials, locations, measurements, and items stay unknown.
+- **One guarded path writes.** A change is locked, backed up, rebuilt, verified, and checked for broken links before it replaces the JSONL.
+
+`Data/store/*.jsonl` is the source of truth. SQLite and `Inventory.md` are rebuilt views.
 
 ## Quick start
 
@@ -41,37 +47,20 @@ property-inventory init
 property-inventory status
 ```
 
-`status` rebuilds SQLite, regenerates the catalogue, runs the semantic verifier, and checks every foreign key.
+`status` rebuilds the views and runs every integrity check.
 
 ## Use it
 
-Query before buying or claiming ownership:
-
 ```bash
-property-inventory search "hex bit" --condition working
+property-inventory search "hex bit" --condition working --summary
 property-inventory context --task "repair a bicycle tyre"
-property-inventory compatibility itm-driver itm-bit
-property-inventory torque-check --tool-item-id itm-driver --requested-nm 4
 ```
 
-Record a real check against an existing item and location:
-
-```bash
-property-inventory physical-check \
-  --actor "Example reviewer" \
-  --source-ref "Checked in person" \
-  --item-id itm-example \
-  --checked-on 2026-08-09 \
-  --location-id loc-example \
-  --quantity 1 \
-  --condition working
-```
-
-The CLI also records plans, orders, deliveries, moves, loans, sales, corrections, evidence, kits, maintenance, insurance readiness, measured spaces, and offline replica proposals. Run `property-inventory --help` for the complete command surface.
+The CLI also records checks, orders, deliveries, moves, loans, sales, returns, evidence, maintenance, and offline proposals. Run `property-inventory --help` for every command.
 
 ## Connect an agent
 
-The MCP server is a local stdio process. Its default read profile can search, inspect, and reason about the inventory without changing canonical JSONL.
+The MCP server exposes inventory queries as local tools an agent can call over stdio.
 
 ```json
 {
@@ -85,31 +74,11 @@ The MCP server is a local stdio process. Its default read profile can search, in
 }
 ```
 
-The private write profile may prepare bounded proposals, capture reviews, and replica plans. It cannot apply them or invoke direct lifecycle mutations. See [MCP profiles](docs/mcp.md).
-
-## Deliberate limits
-
-There is no web or phone interface, hosted sync service, bundled recognition model, insurer integration, or proof of broad real-world adoption. Spatial packing is a deterministic measured-box heuristic, not an optimal organizer. Local capture adapters are trusted programs and still require explicit review.
+The instance selects an inventory, the scope filters visible data, and the profile controls tools. Read mode cannot write; private tools prepare proposals for reviewed CLI application. See [MCP profiles](docs/mcp.md).
 
 ## Documentation
 
-- [Architecture](docs/architecture.md)
-- [Schema](docs/schema.md)
-- [Operations and recovery](docs/operations.md)
-- [MCP profiles](docs/mcp.md)
-- [Capture adapter protocol](docs/capture-adapter-protocol.md)
-- [Threat model](docs/threat-model.md)
-
-## Development
-
-```bash
-ruff check .
-python3 -m compileall -q src property_inventory.py rebuild_inventory_sqlite.py render_inventory.py verify_inventory.py
-python3 -m unittest discover -v -s tests -p 'test_*.py'
-vhs docs/assets/demo.tape
-python3 scripts/check-readme-visuals.py
-scripts/check-public-leaks.sh
-```
+[Architecture](docs/architecture.md) · [Schema](docs/schema.md) · [Operations](docs/operations.md) · [MCP](docs/mcp.md) · [Capture](docs/capture-adapter-protocol.md) · [Threat model](docs/threat-model.md)
 
 ## License
 

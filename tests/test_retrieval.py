@@ -268,6 +268,92 @@ class RetrievalTest(unittest.TestCase):
             "unknown, not absent",
         )
 
+    def test_search_summary_keeps_known_facts_and_unknown_meaning(self) -> None:
+        self.assertEqual(
+            self.cli("search", "Torx", "--summary", scope="public"),
+            {
+                "matching_record_found": True,
+                "count": 1,
+                "matches": [
+                    {
+                        "name": "T25",
+                        "ownership": "candidate",
+                        "condition": "new",
+                        "location": "Workshop",
+                        "last_physical_check_on": None,
+                        "evidence_types": ["merchant_account"],
+                    }
+                ],
+                "next_cursor": None,
+                "page_count": 1,
+                "truncated": False,
+            },
+        )
+        self.assertEqual(
+            self.cli("search", "not recorded", "--summary", scope="public"),
+            {
+                "matching_record_found": False,
+                "count": 0,
+                "matches": [],
+                "meaning": "unknown, not absent",
+                "next_cursor": None,
+                "page_count": 0,
+                "truncated": False,
+            },
+        )
+        completed = subprocess.run(
+            self.command("search", "not recorded", "--summary", scope="public"),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr or completed.stdout)
+        self.assertLess(
+            completed.stdout.index('"meaning"'),
+            completed.stdout.index('"matching_record_found"'),
+        )
+
+        first_page = self.cli("search", "T25", "--limit", "1", "--summary")
+        self.assertEqual(first_page["page_count"], 1)
+        self.assertTrue(first_page["truncated"])
+        self.assertIsInstance(first_page["next_cursor"], str)
+        second_page = self.cli(
+            "search",
+            "T25",
+            "--limit",
+            "1",
+            "--cursor",
+            first_page["next_cursor"],
+            "--summary",
+        )
+        self.assertEqual(second_page["page_count"], 1)
+        self.assertFalse(second_page["truncated"])
+        self.assertIsNone(second_page["next_cursor"])
+        self.assertEqual(
+            {first_page["matches"][0]["name"], second_page["matches"][0]["name"]},
+            {"T25", "T25 spare"},
+        )
+
+    def test_status_summary_reports_the_integrity_gate(self) -> None:
+        self.assertEqual(
+            self.cli("status", "--summary"),
+            {
+                "integrity_gate": "pass",
+                "verification_failures": [],
+                "foreign_key_failures": 0,
+            },
+        )
+        for scope in ("public", "personal"):
+            self.assertEqual(
+                self.cli("status", "--summary", scope=scope),
+                {
+                    "integrity_gate": "pass",
+                    "scope": scope,
+                    "verification_failures": None,
+                    "foreign_key_failures": None,
+                },
+            )
+
     def test_typed_filters_and_deterministic_limit(self) -> None:
         common = (
             "--category",
