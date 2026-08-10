@@ -124,6 +124,7 @@ class PublicReleaseHygieneTests(unittest.TestCase):
         completed = subprocess.run(
             ["./check-public-leaks.sh"],
             cwd=repository,
+            env=self._environment_with_rg(repository, 1),
             text=True,
             capture_output=True,
             check=False,
