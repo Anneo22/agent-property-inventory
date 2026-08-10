@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate the README GIF and compare its stable states."""
+"""Regenerate the README GIF and verify its portable story contract."""
 
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ TAPE = ROOT / "docs" / "assets" / "demo.tape"
 GIF = ROOT / "docs" / "assets" / "property-inventory-demo.gif"
 OUTPUT = "Output docs/assets/property-inventory-demo.gif"
 EXPECTED_SIZE = (1600, 1080)
-STABLE_FRAMES = (80, 120)
 
 
 def validate_gif(path: Path) -> tuple[int, int]:
@@ -34,19 +33,33 @@ def validate_gif(path: Path) -> tuple[int, int]:
     return frames, duration
 
 
-def compare_stable_frames(committed: Path, regenerated: Path) -> None:
-    with Image.open(committed) as expected, Image.open(regenerated) as actual:
-        for index in STABLE_FRAMES:
-            expected.seek(index)
-            actual.seek(index)
-            difference = ImageChops.difference(
-                expected.convert("RGB"), actual.convert("RGB")
-            )
-            statistics = ImageStat.Stat(difference)
-            if max(statistics.mean) > 0.15 or max(high for _, high in statistics.extrema) > 12:
-                raise SystemExit(
-                    f"README GIF stable frame {index} differs from regeneration"
-                )
+def frame_difference(image: Image.Image, first: int, second: int) -> float:
+    image.seek(first)
+    before = image.convert("RGB")
+    image.seek(second)
+    after = image.convert("RGB")
+    return max(ImageStat.Stat(ImageChops.difference(before, after)).mean)
+
+
+def validate_story_states(path: Path) -> None:
+    """Check the intended blank, command, result, blank sequence.
+
+    Font rasterization differs between macOS and Linux, so cross-platform pixel
+    identity is not a valid reproducibility contract. The tape, real CLI output,
+    dimensions, timing, and visible state progression are portable.
+    """
+    with Image.open(path) as image:
+        if image.n_frames < 100:
+            raise SystemExit("README GIF does not contain the expected story states")
+        closing = image.n_frames - 6
+        if (
+            frame_difference(image, 5, 15) < 0.05
+            or frame_difference(image, 15, 25) < 0.02
+            or frame_difference(image, 25, 80) < 0.5
+            or frame_difference(image, 80, closing) < 0.5
+            or frame_difference(image, 5, closing) > 0.02
+        ):
+            raise SystemExit("README GIF no longer shows the checked state progression")
 
 
 def main() -> None:
@@ -81,6 +94,7 @@ def main() -> None:
         raise SystemExit("README GIF tape no longer satisfies the release contract")
 
     committed_shape = validate_gif(GIF)
+    validate_story_states(GIF)
     environment = {
         key: value
         for key, value in os.environ.items()
@@ -104,12 +118,12 @@ def main() -> None:
         if completed.returncode != 0:
             raise SystemExit(completed.stderr or completed.stdout)
         regenerated_shape = validate_gif(regenerated)
+        validate_story_states(regenerated)
         if (
             abs(regenerated_shape[0] - committed_shape[0]) > 4
             or abs(regenerated_shape[1] - committed_shape[1]) > 250
         ):
             raise SystemExit("README GIF timing drifted during regeneration")
-        compare_stable_frames(GIF, regenerated)
 
     print("README GIF: pass")
 
