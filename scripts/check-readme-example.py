@@ -177,7 +177,10 @@ def main() -> None:
             )
         )
         raise SystemExit(f"README first-capture example has drifted:\n{difference}")
-    if "docs/assets/" in readme:
+    without_checked_gif = readme.replace(
+        "docs/assets/property-inventory-demo.gif", ""
+    )
+    if "docs/assets/" in without_checked_gif:
         raise SystemExit("README still references retired decorative assets")
     print("README CLI example: pass")
 

@@ -5,6 +5,8 @@ pattern='/Users/[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+|[A-Za-z0-9._%+-]+@(?!(?:ex
 
 if rg --text --pcre2 -n --hidden "$pattern" \
     -g '!.git/**' \
+    -g '!docs/assets/property-inventory-demo.gif' \
+    -g '!docs/assets/physical-memory.gif' \
     -g '!scripts/check-public-leaks.sh'; then
     echo "Found a private home path or email address in publishable files." >&2
     exit 1
@@ -42,6 +44,8 @@ fi
 
 while IFS= read -r revision; do
     if git grep --text -n -P "$pattern" "$revision" -- . \
+        ':(exclude)docs/assets/property-inventory-demo.gif' \
+        ':(exclude)docs/assets/physical-memory.gif' \
         ':(exclude)scripts/check-public-leaks.sh' >>"$history_matches"; then
         :
     else
@@ -64,12 +68,60 @@ while IFS= read -r revision; do
             docs/assets/property-inventory-demo.gif|docs/assets/physical-memory.gif)
                 if ! git cat-file blob "$revision:$tracked_path" | python3 -c '
 import struct
+import re
 import sys
 
 payload = sys.stdin.buffer.read()
 if len(payload) > 5_000_000 or payload[:6] not in {b"GIF87a", b"GIF89a"}:
     raise SystemExit(1)
-if len(payload) < 10 or struct.unpack("<HH", payload[6:10]) not in {(960, 560), (960, 520), (1440, 720)}:
+if len(payload) < 10 or struct.unpack("<HH", payload[6:10]) not in {(960, 560), (960, 520), (1440, 720), (1600, 1080)}:
+    raise SystemExit(1)
+
+private = re.compile(rb"/Users/[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+|[A-Za-z0-9._%+-]+@(?!(?:example\.invalid)\b)[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+position = 13
+if payload[10] & 0x80:
+    position += 3 * (2 ** ((payload[10] & 0x07) + 1))
+
+def subblocks(start):
+    chunks = []
+    while True:
+        if start >= len(payload):
+            raise SystemExit(1)
+        size = payload[start]
+        start += 1
+        if size == 0:
+            return start, b"".join(chunks)
+        if start + size > len(payload):
+            raise SystemExit(1)
+        chunks.append(payload[start : start + size])
+        start += size
+
+while position < len(payload):
+    marker = payload[position]
+    position += 1
+    if marker == 0x3B:
+        break
+    if marker == 0x2C:
+        if position + 9 > len(payload):
+            raise SystemExit(1)
+        packed = payload[position + 8]
+        position += 9
+        if packed & 0x80:
+            position += 3 * (2 ** ((packed & 0x07) + 1))
+        if position >= len(payload):
+            raise SystemExit(1)
+        position += 1
+        position, _ = subblocks(position)
+        continue
+    if marker == 0x21:
+        if position >= len(payload):
+            raise SystemExit(1)
+        label = payload[position]
+        position += 1
+        position, metadata = subblocks(position)
+        if label in {0x01, 0xFE, 0xFF} and private.search(metadata):
+            raise SystemExit(1)
+        continue
     raise SystemExit(1)
 '; then
                     echo "$revision:$tracked_path"

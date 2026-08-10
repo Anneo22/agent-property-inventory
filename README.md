@@ -8,6 +8,10 @@ It records individual objects, where they are, their condition, the interfaces t
 
 I built it because I wanted a durable way to record and query what I physically own, and to stop buying duplicates.
 
+<p align="center">
+  <img src="docs/assets/property-inventory-demo.gif" width="800" alt="A real CLI query finds one physically checked T25 Torx bit in the tool drawer, with confirmed ownership and working condition.">
+</p>
+
 ## See it answer a real question
 
 This exact block is reproduced from a temporary inventory by [`check-readme-example.py`](scripts/check-readme-example.py), which the [CI workflow](.github/workflows/checks.yml) runs against the real CLI.

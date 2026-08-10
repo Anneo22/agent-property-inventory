@@ -76,6 +76,14 @@ jobs:
       - name: Check README CLI example
         run: python scripts/check-readme-example.py
 
+      - name: Install VHS
+        uses: charmbracelet/vhs-action@59641cdc7fadf3978db65eb8c6937ea2752f4ec3 # v2
+        with:
+          version: v0.11.0
+
+      - name: Check README GIF
+        run: python scripts/check-readme-gif.py
+
       - name: Build wheel
         run: python -m pip wheel --no-deps --wheel-dir dist .
 
