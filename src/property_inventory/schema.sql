@@ -3,7 +3,7 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE metadata (
   inventory_id TEXT PRIMARY KEY CHECK (length(inventory_id) > 0),
-  schema_version INTEGER NOT NULL CHECK (schema_version = 6)
+  schema_version INTEGER NOT NULL CHECK (schema_version = 7)
 );
 
 -- Runtime-only attestation written by the rebuild after the canonical generation
@@ -37,7 +37,12 @@ CREATE TABLE locations (
   location_id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   parent_location_id TEXT REFERENCES locations(location_id),
-  kind TEXT NOT NULL CHECK (kind IN ('place','room','container','vehicle','asset','unknown')),
+  -- One arbitrary-depth spatial tree spans every scale.  The six original kinds
+  -- keep their meaning so a migrated store is never reinterpreted.
+  kind TEXT NOT NULL CHECK (kind IN (
+    'place','room','container','vehicle','asset','unknown',
+    'site','building','floor','zone','furniture','compartment'
+  )),
   sensitivity TEXT NOT NULL CHECK (sensitivity IN ('low','personal','high')),
   notes TEXT
 );
@@ -105,9 +110,13 @@ CREATE TABLE items (
     )
   ),
   unit TEXT NOT NULL DEFAULT 'item',
-  ownership_state TEXT NOT NULL CHECK (ownership_state IN ('confirmed','candidate','not_owned','disposed','refunded','planned','lent','unknown')),
+  ownership_state TEXT NOT NULL CHECK (ownership_state IN ('confirmed','candidate','not_owned','disposed','refunded','planned','unknown')),
   location_id TEXT REFERENCES locations(location_id),
   container_id TEXT REFERENCES locations(location_id),
+  -- Where the item belongs, which is not where it currently is.  NULL means the
+  -- home is unknown; it never means "the same as the current placement".
+  home_location_id TEXT REFERENCES locations(location_id),
+  home_container_id TEXT REFERENCES locations(location_id),
   condition TEXT,
   serial_or_lot TEXT,
   acquired_on TEXT,
@@ -490,6 +499,59 @@ CREATE TABLE fact_amendments (
   CHECK ((action = 'replace') = (replacement_json IS NOT NULL))
 );
 
+-- A party is a counterparty in a custody, ownership or access claim. It exists
+-- only when evidence names it, so an unresolved custodian invents nobody.
+CREATE TABLE parties (
+  party_id TEXT PRIMARY KEY,
+  name TEXT NOT NULL CHECK (length(name) > 0),
+  party_kind TEXT NOT NULL CHECK (
+    party_kind IN ('person','household','organisation','unknown')
+  ),
+  evidence_id TEXT NOT NULL REFERENCES evidence(evidence_id),
+  sensitivity TEXT NOT NULL CHECK (sensitivity IN ('low','personal','high')),
+  notes TEXT
+);
+
+-- Custody, ownership and access are separate claims about the same item. A loan
+-- moves custody and leaves ownership untouched.
+CREATE TABLE item_party_relations (
+  relation_id TEXT PRIMARY KEY,
+  item_id TEXT NOT NULL REFERENCES items(item_id) ON DELETE CASCADE,
+  party_id TEXT REFERENCES parties(party_id),
+  role TEXT NOT NULL CHECK (role IN ('owner','custodian','access')),
+  custody_kind TEXT CHECK (custody_kind IN ('loan','storage','service','transit','possession','unknown')),
+  status TEXT NOT NULL CHECK (status IN ('active','ended')),
+  started_on TEXT,
+  ended_on TEXT,
+  due_on TEXT,
+  quantity REAL CHECK (quantity IS NULL OR quantity > 0),
+  unit TEXT,
+  evidence_id TEXT NOT NULL REFERENCES evidence(evidence_id),
+  ended_evidence_id TEXT REFERENCES evidence(evidence_id),
+  sensitivity TEXT NOT NULL CHECK (sensitivity IN ('low','personal','high')),
+  notes TEXT,
+  CHECK (party_id IS NOT NULL OR role = 'custodian'),
+  CHECK ((role = 'custodian') = (custody_kind IS NOT NULL)),
+  CHECK ((quantity IS NULL) = (unit IS NULL)),
+  CHECK (due_on IS NULL OR role = 'custodian'),
+  CHECK (status = 'active' OR status = 'ended'),
+  CHECK (
+    (status = 'active' AND ended_on IS NULL AND ended_evidence_id IS NULL)
+    OR (status = 'ended' AND ended_on IS NOT NULL AND ended_evidence_id IS NOT NULL)
+  )
+);
+
+-- An owned item may itself be a place: a toolbox, a van, a filing cabinet. This
+-- is one node of the same location tree, never a second placement truth.
+CREATE TABLE location_embodiments (
+  embodiment_id TEXT PRIMARY KEY,
+  item_id TEXT NOT NULL UNIQUE REFERENCES items(item_id) ON DELETE CASCADE,
+  location_id TEXT NOT NULL UNIQUE REFERENCES locations(location_id),
+  evidence_id TEXT NOT NULL REFERENCES evidence(evidence_id),
+  sensitivity TEXT NOT NULL CHECK (sensitivity IN ('low','personal','high')),
+  notes TEXT
+);
+
 CREATE TABLE inventory_events (
   event_id TEXT PRIMARY KEY,
   sequence INTEGER NOT NULL UNIQUE CHECK (sequence > 0),
@@ -510,6 +572,12 @@ CREATE TABLE inventory_events (
     'cancelled',
     'refunded',
     'loan_returned',
+    'custody_started',
+    'custody_ended',
+    'access_granted',
+    'access_revoked',
+    'ownership_started',
+    'ownership_ended',
     'planned',
     'ownership_unresolved',
     'ownership_excluded',
@@ -545,9 +613,23 @@ CREATE TABLE inventory_events (
   )
 );
 
+-- Full root-to-leaf ancestry for every node, so a reader never has to walk the
+-- tree itself. A cycle would make the walk unbounded, and the semantic checks
+-- reject one before this projection is ever built.
+CREATE VIEW v_location_paths AS
+WITH RECURSIVE walk(location_id, ancestor_id, depth, path_text) AS (
+  SELECT location_id, parent_location_id, 1, name FROM locations
+  UNION ALL
+  SELECT w.location_id, p.parent_location_id, w.depth + 1, p.name || ' / ' || w.path_text
+  FROM walk w
+  JOIN locations p ON p.location_id = w.ancestor_id
+)
+SELECT location_id, path_text, depth FROM walk WHERE ancestor_id IS NULL;
+
 CREATE VIEW v_inventory AS
 SELECT i.item_id, m.name, m.brand, m.model, m.category, i.quantity, i.unit,
        i.ownership_state, l.name AS location, c.name AS container,
+       lp.path_text AS location_path, hp.path_text AS home_location_path,
        i.condition, i.serial_or_lot, i.verified_on, i.sensitivity,
        e.evidence_type, e.claim_strength, m.interfaces_json, m.specs_json,
        m.identifiers_json, i.purchase_price, i.purchase_currency,
@@ -557,7 +639,11 @@ FROM items i
 JOIN models m ON m.model_id = i.model_id
 JOIN evidence e ON e.evidence_id = i.primary_evidence_id
 LEFT JOIN locations l ON l.location_id = i.location_id
-LEFT JOIN locations c ON c.location_id = i.container_id;
+LEFT JOIN locations c ON c.location_id = i.container_id
+LEFT JOIN v_location_paths lp
+  ON lp.location_id = COALESCE(i.container_id, i.location_id)
+LEFT JOIN v_location_paths hp
+  ON hp.location_id = COALESCE(i.home_container_id, i.home_location_id);
 
 CREATE VIRTUAL TABLE inventory_search USING fts5(
   item_id UNINDEXED,

@@ -153,7 +153,7 @@ class McpStdioTest(unittest.TestCase):
                                 "must never persist",
                                 "--kind",
                                 "room",
-                            ]
+                            ],
                         ]
                     },
                 )
@@ -839,7 +839,33 @@ class McpStdioTest(unittest.TestCase):
                                 "loc-mcp-fixture",
                                 "--kind",
                                 "room",
-                            ]
+                            ],
+                            [
+                                "ownership-start",
+                                "--actor",
+                                "MCP fixture",
+                                "--source-ref",
+                                "review-only owner observation",
+                                "--item-id",
+                                "itm-review-only",
+                                "--party-id",
+                                "party-review-only",
+                                "--started-on",
+                                "2026-08-10",
+                            ],
+                            [
+                                "custody-start",
+                                "--actor",
+                                "MCP fixture",
+                                "--source-ref",
+                                "review-only custody observation",
+                                "--item-id",
+                                "itm-review-only",
+                                "--custody-kind",
+                                "unknown",
+                                "--started-on",
+                                "2026-08-10",
+                            ],
                         ]
                     },
                 )
@@ -851,6 +877,13 @@ class McpStdioTest(unittest.TestCase):
                     "show_inventory_proposal", {"proposal_id": proposal_id}
                 )
                 self.assertEqual(shown.structured_content["proposal"]["status"], "prepared")
+                self.assertEqual(
+                    [
+                        operation[0]
+                        for operation in shown.structured_content["proposal"]["operations"]
+                    ],
+                    ["add-location", "ownership-start", "custody-start"],
+                )
                 self.assertNotIn("apply_inventory_proposal", names)
                 self.assertNotIn("apply_replica_sync", names)
                 self.assertEqual(

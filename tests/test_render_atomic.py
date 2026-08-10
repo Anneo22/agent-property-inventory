@@ -38,7 +38,7 @@ class RenderScopeAndAtomicWriteTest(unittest.TestCase):
         with sqlite3.connect(self.database) as con:
             con.executescript(SCHEMA.read_text())
             con.execute(
-                "INSERT INTO metadata (inventory_id, schema_version) VALUES (?, 6)",
+                "INSERT INTO metadata (inventory_id, schema_version) VALUES (?, 7)",
                 ("inv-render-test-owner-a",),
             )
             con.executemany(
@@ -130,7 +130,7 @@ class RenderScopeAndAtomicWriteTest(unittest.TestCase):
                         "ev-personal",
                         "CANARY_PERSONAL_ITEM_NOTES_SECRET",
                     ),
-                    ("itm-high", "mdl-high", "lent", "high", "loc-high-parent", None, "ev-high", "CANARY_HIGH_ITEM_NOTES_SECRET"),
+                    ("itm-high", "mdl-high", "confirmed", "high", "loc-high-parent", None, "ev-high", "CANARY_HIGH_ITEM_NOTES_SECRET"),
                 ],
             )
             con.executemany(

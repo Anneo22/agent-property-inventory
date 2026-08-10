@@ -474,10 +474,11 @@ def main() -> None:
         scalar(
             con,
             "SELECT count(*) FROM items i JOIN locations c ON c.location_id=i.container_id "
-            "WHERE c.kind NOT IN ('container','vehicle','asset')",
+            "WHERE c.kind NOT IN "
+            "('container','vehicle','asset','furniture','compartment')",
         )
         == 0,
-        "an item container_id is not a container, vehicle or asset",
+        "an item container_id has a non-container location kind",
     )
     require(
         scalar(
@@ -800,8 +801,10 @@ def main() -> None:
             "reacquired",
             "ownership_corrected",
             "loan_returned",
+            # A loan moves custody, not ownership, so a lent event leaves a v7
+            # item confirmed.
+            "lent",
         },
-        "lent": {"lent"},
         "disposed": {"sold", "gifted", "disposed", "lost"},
         "refunded": {"returned", "cancelled", "refunded"},
         "planned": {"planned"},
@@ -837,6 +840,104 @@ def main() -> None:
             bool(event_types) and event_types[-1] in allowed_events,
             f"item state disagrees with its latest lifecycle event: {item_id} -> {current_state}",
         )
+    relation_event_types = (
+        "lent",
+        "loan_returned",
+        "custody_started",
+        "custody_ended",
+        "access_granted",
+        "access_revoked",
+        "ownership_started",
+        "ownership_ended",
+    )
+    for item_id, event_type, occurred_on, evidence_id, relation_id in con.execute(
+        "SELECT item_id, event_type, occurred_on, evidence_id, "
+        "json_extract(details_json, '$.relation_id') FROM inventory_events "
+        f"WHERE event_type IN ({','.join('?' for _ in relation_event_types)})",
+        relation_event_types,
+    ):
+        if relation_id is None:
+            require(
+                event_type in {"lent", "loan_returned"},
+                f"relation event lacks a relation binding: {item_id} {event_type}",
+            )
+            continue
+        relation = con.execute(
+            "SELECT item_id, role, custody_kind, status, started_on, ended_on, "
+            "evidence_id, ended_evidence_id FROM item_party_relations WHERE relation_id=?",
+            (relation_id,),
+        ).fetchone()
+        require(
+            relation is not None and relation[0] == item_id,
+            f"relation event names a missing or different relation: {relation_id}",
+        )
+        if relation is None:
+            continue
+        if event_type in {"lent", "custody_started"}:
+            valid = (
+                relation[1] == "custodian"
+                and relation[4] == occurred_on
+                and relation[6] == evidence_id
+                and ((event_type == "lent") == (relation[2] == "loan"))
+            )
+        elif event_type in {"loan_returned", "custody_ended"}:
+            valid = (
+                relation[1] == "custodian"
+                and relation[3] == "ended"
+                and relation[5] == occurred_on
+                and relation[7] == evidence_id
+                and ((event_type == "loan_returned") == (relation[2] == "loan"))
+            )
+        elif event_type in {"access_granted", "ownership_started"}:
+            valid = (
+                relation[1]
+                == ("access" if event_type == "access_granted" else "owner")
+                and relation[4] == occurred_on
+                and relation[6] == evidence_id
+            )
+        else:
+            valid = (
+                event_type in {"access_revoked", "ownership_ended"}
+                and relation[1]
+                == ("access" if event_type == "access_revoked" else "owner")
+                and relation[3] == "ended"
+                and relation[5] == occurred_on
+                and relation[7] == evidence_id
+            )
+        require(valid, f"relation event disagrees with relation: {relation_id}")
+    for item_id, event_type, sequence in con.execute(
+        """
+        SELECT e.item_id, e.event_type, e.sequence FROM inventory_events e
+        JOIN (
+          SELECT item_id, max(sequence) AS sequence FROM inventory_events
+          WHERE event_type IN ('lent', 'loan_returned')
+            AND json_extract(details_json, '$.relation_id') IS NULL
+          GROUP BY item_id
+        ) latest ON latest.item_id=e.item_id AND latest.sequence=e.sequence
+        """
+    ):
+        active_loans = scalar(
+            con,
+            "SELECT count(*) FROM item_party_relations WHERE item_id=? AND role='custodian' "
+            "AND custody_kind='loan' AND status='active'",
+            (item_id,),
+        )
+        later_bound_legacy_relation_event = scalar(
+            con,
+            "SELECT count(*) FROM inventory_events e "
+            "JOIN item_party_relations r "
+            "ON r.relation_id=json_extract(e.details_json, '$.relation_id') "
+            "WHERE e.item_id=? AND e.sequence>? AND r.role='custodian' "
+            "AND r.custody_kind='loan' AND r.party_id IS NULL AND r.started_on IS NULL",
+            (item_id, sequence),
+        )
+        if event_type == "lent":
+            require(
+                active_loans >= 1 or later_bound_legacy_relation_event >= 1,
+                f"latest lent event lacks active loan custody: {item_id}",
+            )
+        else:
+            require(active_loans == 0, f"loan return leaves active loan custody: {item_id}")
 
     acceptance = {
         "torque_paths": scalar(con, "SELECT count(*) FROM torque_paths"),
@@ -852,7 +953,7 @@ def main() -> None:
             """
             WITH RECURSIVE place_tree(location_id) AS (
               SELECT location_id FROM locations
-              WHERE kind='place' AND parent_location_id IS NULL
+              WHERE kind IN ('place','site','building') AND parent_location_id IS NULL
               UNION ALL
               SELECT l.location_id FROM locations l
               JOIN place_tree pt ON l.parent_location_id=pt.location_id
@@ -870,7 +971,7 @@ def main() -> None:
             """
             WITH RECURSIVE place_tree(location_id) AS (
               SELECT location_id FROM locations
-              WHERE kind='place' AND parent_location_id IS NULL
+              WHERE kind IN ('place','site','building') AND parent_location_id IS NULL
               UNION ALL
               SELECT l.location_id FROM locations l
               JOIN place_tree pt ON l.parent_location_id=pt.location_id

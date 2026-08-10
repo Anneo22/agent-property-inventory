@@ -115,7 +115,7 @@ class DiscoveryImportFlowTest(unittest.TestCase):
         )
         lent_error = self.fails(*self.discover_arguments("photo:tool-2"))["error"]
         self.assertIn(result["item_id"], lent_error)
-        self.assertIn("lent", lent_error)
+        self.assertIn("confirmed", lent_error)
         second = self.cli(*self.discover_arguments("photo:tool-2"), "--new-unit")["result"]
         self.assertFalse(second["model_created"])
         self.assertEqual(second["model_id"], result["model_id"])

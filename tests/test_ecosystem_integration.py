@@ -212,7 +212,7 @@ class EcosystemCliTest(unittest.TestCase):
         matrix = self.cli("compatibility-status")
         self.assertEqual(matrix["status"], "pass")
         self.assertEqual(
-            [row["schema_version"] for row in matrix["entries"]], [1, 2, 3, 4, 5, 6]
+            [row["schema_version"] for row in matrix["entries"]], [1, 2, 3, 4, 5, 6, 7]
         )
         error = self.fails("doctor", "--output", str(self.root / "unsafe.tar.gz"))
         self.assertIn("outside managed root", error["error"])

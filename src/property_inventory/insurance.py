@@ -301,6 +301,7 @@ def _item_assessment(
     photo_evidence: list[dict[str, object]],
     receipt_evidence: bool,
     appraisal_evidence: bool,
+    active_external_custody: bool = False,
 ) -> dict[str, object]:
     document_facts = [
         fact
@@ -330,8 +331,7 @@ def _item_assessment(
         "location": location_assessment,
         "evidence_quality": _evidence_quality(supported_evidence),
         "custody": _assessment(
-            item.get("ownership_state") == "confirmed"
-            or (item.get("ownership_state") == "lent" and location_assessment["state"] == "present")
+            item.get("ownership_state") == "confirmed" and not active_external_custody
         ),
     }
     gaps = [name for name, assessment in fields.items() if assessment["state"] == "unknown"]
@@ -405,12 +405,18 @@ def insurance_report(
         if isinstance(row.get("asset_id"), str)
     }
     asset_links = _rows(rows, "evidence_assets")
+    active_external_custody_ids = {
+        row.get("item_id")
+        for row in _rows(rows, "item_party_relations")
+        if row.get("role") == "custodian" and row.get("status") == "active"
+        and row.get("custody_kind") in {"loan", "storage", "service", "transit", "unknown"}
+    }
     visible_items = sorted(
         (
             {**item, **scope_visible_item_details(rows, item, scope)}
             for item in items
             if _visible(item, maximum, "items")
-            and item.get("ownership_state") in {"confirmed", "lent"}
+            and item.get("ownership_state") == "confirmed"
             and isinstance(item.get("item_id"), str)
         ),
         key=lambda item: str(item["item_id"]),
@@ -554,6 +560,7 @@ def insurance_report(
                 photo_evidence,
                 receipt_evidence,
                 appraisal_evidence,
+                item["item_id"] in active_external_custody_ids,
             )
         )
     report_items.sort(key=lambda item: str(item["item_id"]))
@@ -767,7 +774,7 @@ def _validate_report(report: Mapping[str, Any]) -> None:
         item_ids.add(item_id)
         if item.get("category") is not None and not isinstance(item.get("category"), str):
             raise InsuranceError("insurance report has invalid item category")
-        if item.get("ownership_state") not in {"confirmed", "lent"}:
+        if item.get("ownership_state") != "confirmed":
             raise InsuranceError("insurance report has invalid item ownership state")
         if item.get("readiness") not in {"ready", "not_ready"} or not isinstance(
             item.get("gaps"), list
@@ -1050,13 +1057,17 @@ def _validate_report(report: Mapping[str, Any]) -> None:
             "evidence_quality": "present" if item_evidence_ids else "unknown",
             "custody": "present"
             if item["ownership_state"] == "confirmed"
-            or (
-                item["ownership_state"] == "lent"
-                and item["fields"]["location"]["state"] == "present"
-            )
             else "unknown",
         }
-        if any(item["fields"][name]["state"] != state for name, state in expected_states.items()):
+        # A private report may have excluded an active external/unknown custody
+        # relation from the package.  In that case unknown is conservative and
+        # must remain representable rather than being rewritten as possession.
+        if item["fields"]["custody"]["state"] not in {"present", "unknown"}:
+            raise InsuranceError("insurance report has inconsistent field state")
+        if any(
+            name != "custody" and item["fields"][name]["state"] != state
+            for name, state in expected_states.items()
+        ):
             raise InsuranceError("insurance report has inconsistent field state")
         expected_observations = [
             {

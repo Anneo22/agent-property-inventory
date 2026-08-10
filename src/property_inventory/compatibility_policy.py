@@ -14,12 +14,13 @@ class CompatibilityError(ValueError):
 
 MINIMUM_PYTHON = (3, 11)
 MIGRATION_ACTIONS = {
-    1: "migrate_v1_to_v6",
-    2: "migrate_v2_to_v6",
-    3: "migrate_v3_to_v6",
-    4: "migrate_v4_to_v6",
-    5: "migrate_v5_to_v6",
-    6: "read_current",
+    1: "migrate_v1_to_v7",
+    2: "migrate_v2_to_v7",
+    3: "migrate_v3_to_v7",
+    4: "migrate_v4_to_v7",
+    5: "migrate_v5_to_v7",
+    6: "migrate_v6_to_v7",
+    7: "read_current",
 }
 SUPPORTED_SCHEMA_VERSIONS = tuple(MIGRATION_ACTIONS)
 

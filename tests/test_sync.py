@@ -83,7 +83,8 @@ class ReplicaSyncTests(unittest.TestCase):
                     }
                 )
             detail_fields = changed & {
-                "acquired_on", "condition", "purchase_currency", "purchase_price", "receipt_ref", "serial_or_lot"
+                "acquired_on", "condition", "home_container_id", "home_location_id",
+                "purchase_currency", "purchase_price", "receipt_ref", "serial_or_lot",
             }
             if detail_fields and not any(
                 row.get("item_id") == item_id for row in existing_detail_amendments
@@ -96,7 +97,9 @@ class ReplicaSyncTests(unittest.TestCase):
                             {
                                 field: before.get(field)
                                 for field in (
-                                    "acquired_on", "condition", "purchase_currency", "purchase_price", "receipt_ref", "serial_or_lot"
+                                    "acquired_on", "condition", "home_container_id",
+                                    "home_location_id", "purchase_currency",
+                                    "purchase_price", "receipt_ref", "serial_or_lot",
                                 )
                             },
                             sort_keys=True,
@@ -959,6 +962,57 @@ class ReplicaSyncTests(unittest.TestCase):
                 merged_store_validator=strict_fixture_validator,
             )
 
+    def test_new_item_creation_cannot_smuggle_an_unevidenced_home(self) -> None:
+        base = fixture()
+        replica = copy.deepcopy(base)
+        replica["items"].append(
+            {
+                "item_id": "item-forged-home", "location_id": "room-a",
+                "container_id": None, "home_location_id": "room-a",
+                "home_container_id": None, "ownership_state": "planned",
+                "quantity": 1, "unit": "item", "verified_on": None,
+                "primary_evidence_id": "evidence-forged-home",
+                "acquired_on": None, "condition": None,
+                "purchase_currency": None, "purchase_price": None,
+                "receipt_ref": None, "serial_or_lot": None,
+                "replacement_value": None, "value_currency": None,
+            }
+        )
+        replica["evidence"].append(
+            {
+                "evidence_id": "evidence-forged-home",
+                "evidence_type": "user_source", "source_ref": "cart",
+                "captured_on": "2026-08-06", "claim_strength": "purchase_only",
+                "sensitivity": "low", "notes": None,
+            }
+        )
+        replica["item_evidence"].append(
+            {
+                "item_id": "item-forged-home",
+                "evidence_id": "evidence-forged-home", "role": "primary",
+            }
+        )
+        replica["inventory_events"].append(
+            {
+                "event_id": "event-forged-home", "sequence": 1,
+                "item_id": "item-forged-home", "event_type": "planned",
+                "occurred_on": "2026-08-06", "observed_on": "2026-08-06",
+                "occurred_on_precision": "exact", "actor": "forged writer",
+                "evidence_id": "evidence-forged-home", "location_id": "room-a",
+                "container_id": None, "area_location_id": None,
+                "context_quality": "bound", "details_json": None, "notes": None,
+            }
+        )
+        raw_bundle = build_replica_bundle(
+            inventory_id="inventory-fixture", replica_ref="replica-fixture",
+            base=base, head=replica,
+        )
+        with self.assertRaisesRegex(SyncError, "impossible creation values"):
+            plan_three_way_merge(
+                base=base, canonical_head=base, bundle=raw_bundle,
+                merged_store_validator=strict_fixture_validator,
+            )
+
     def test_replica_cannot_append_corrected_events(self) -> None:
         base = fixture()
         replica = copy.deepcopy(base)
@@ -1236,6 +1290,8 @@ class ReplicaSyncTests(unittest.TestCase):
             for field in (
                 "acquired_on",
                 "condition",
+                "home_container_id",
+                "home_location_id",
                 "purchase_currency",
                 "purchase_price",
                 "receipt_ref",

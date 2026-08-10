@@ -1115,7 +1115,19 @@ class CaptureIntegrationTests(unittest.TestCase):
             json.loads(line) for line in (self.store / "items.jsonl").read_text().splitlines()
             if json.loads(line)["item_id"] == item_id
         )
-        self.assertEqual(current_item["ownership_state"], "lent")
+        self.assertEqual(current_item["ownership_state"], "confirmed")
+        active_loan = next(
+            row
+            for row in (
+                json.loads(line)
+                for line in (self.store / "item_party_relations.jsonl").read_text().splitlines()
+            )
+            if row["item_id"] == item_id
+            and row["role"] == "custodian"
+            and row["custody_kind"] == "loan"
+            and row["status"] == "active"
+        )
+        self.assertIsNone(active_loan["party_id"])
         self.assertEqual(self.cli("status")["verification"]["failures"], [])
         evidence_asset_rows = [
             json.loads(line)

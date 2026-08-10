@@ -31,7 +31,7 @@ class CatalogueProjectionV6Test(unittest.TestCase):
         with sqlite3.connect(self.database) as con:
             con.executescript(SCHEMA.read_text())
             con.execute(
-                "INSERT INTO metadata (inventory_id, schema_version) VALUES (?, 6)",
+                "INSERT INTO metadata (inventory_id, schema_version) VALUES (?, 7)",
                 ("catalogue-v6",),
             )
             con.executemany(

@@ -395,6 +395,9 @@ class PropertyInventoryLifecycleTest(unittest.TestCase):
                 "item_amendments",
                 "item_detail_amendments",
                 "fact_amendments",
+                "parties",
+                "item_party_relations",
+                "location_embodiments",
                 "inventory_events",
             )
         }
@@ -540,7 +543,7 @@ class PropertyInventoryLifecycleTest(unittest.TestCase):
         metadata = json.loads(metadata_path.read_text())
         metadata["schema_version"] = 4
         metadata_path.write_text(json.dumps(metadata, sort_keys=True) + "\n")
-        for table in legacy_inventory._CLI.V6_TABLES:
+        for table in legacy_inventory._CLI.V7_TABLES:
             if table not in legacy_inventory._CLI.V4_TABLES:
                 (self.store / f"{table}.jsonl").unlink()
 
@@ -572,12 +575,12 @@ class PropertyInventoryLifecycleTest(unittest.TestCase):
         self.assertEqual(rebound["status"], "rebound")
         self.assertEqual(rebound["checks"]["status"], "migration_required")
         self.assertEqual(rebound["checks"]["schema_version"], 4)
-        self.assertEqual(rebound["checks"]["target_schema_version"], 6)
+        self.assertEqual(rebound["checks"]["target_schema_version"], 7)
         self.assertFalse(new_catalogue.exists())
 
         migrated = self.cli("--catalogue-output", str(new_catalogue), "migrate")
         self.assertEqual(migrated["result"]["from_schema"], 4)
-        self.assertEqual(migrated["result"]["to_schema"], 6)
+        self.assertEqual(migrated["result"]["to_schema"], 7)
         self.assertEqual(
             self.cli("--catalogue-output", str(new_catalogue), "status")[
                 "verification"
@@ -590,7 +593,7 @@ class PropertyInventoryLifecycleTest(unittest.TestCase):
         metadata = json.loads(metadata_path.read_text())
         metadata["schema_version"] = 4
         metadata_path.write_text(json.dumps(metadata, sort_keys=True) + "\n")
-        for table in legacy_inventory._CLI.V6_TABLES:
+        for table in legacy_inventory._CLI.V7_TABLES:
             if table not in legacy_inventory._CLI.V4_TABLES:
                 (self.store / f"{table}.jsonl").unlink()
         locations_path = self.store / "locations.jsonl"
@@ -632,7 +635,7 @@ class PropertyInventoryLifecycleTest(unittest.TestCase):
         metadata = json.loads(metadata_path.read_text())
         metadata["schema_version"] = 4
         metadata_path.write_text(json.dumps(metadata, sort_keys=True) + "\n")
-        for table in legacy_inventory._CLI.V6_TABLES:
+        for table in legacy_inventory._CLI.V7_TABLES:
             if table not in legacy_inventory._CLI.V4_TABLES:
                 (self.store / f"{table}.jsonl").unlink()
         (self.root / legacy_inventory._CLI.DEGRADED_MARKER).write_text(
@@ -711,7 +714,7 @@ class PropertyInventoryLifecycleTest(unittest.TestCase):
         self.assertTrue(new_catalogue.is_file())
 
     def test_v1_rebind_promotes_the_new_owner_identity_and_recovers_null_owner(self) -> None:
-        for table in legacy_inventory._CLI.V6_TABLES:
+        for table in legacy_inventory._CLI.V7_TABLES:
             if table not in legacy_inventory._CLI.V1_TABLES:
                 (self.store / f"{table}.jsonl").unlink()
         owner_path = self.runtime / ".property-inventory-owner.json"

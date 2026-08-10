@@ -33,7 +33,7 @@ class SchemaV6Test(unittest.TestCase):
 
     def write_store(self, overrides: dict[str, list[dict]] | None = None) -> dict[str, list[dict]]:
         rows: dict[str, list[dict]] = {
-            "metadata": [{"inventory_id": "inv-test", "schema_version": 6}],
+            "metadata": [{"inventory_id": "inv-test", "schema_version": 7}],
             "proposal_commits": [],
             "locations": [
                 {
@@ -101,6 +101,8 @@ class SchemaV6Test(unittest.TestCase):
                     "ownership_state": "confirmed",
                     "location_id": "loc-test",
                     "container_id": None,
+                    "home_location_id": None,
+                    "home_container_id": None,
                     "condition": None,
                     "serial_or_lot": None,
                     "acquired_on": None,
@@ -153,6 +155,9 @@ class SchemaV6Test(unittest.TestCase):
             "item_amendments": [],
             "item_detail_amendments": [],
             "fact_amendments": [],
+            "parties": [],
+            "item_party_relations": [],
+            "location_embodiments": [],
             "inventory_events": [
                 {
                     "event_id": "evt-ingested-test",
@@ -254,7 +259,7 @@ class SchemaV6Test(unittest.TestCase):
         self.assertIn("metadata.jsonl must contain exactly one record", missing.stderr)
         self.assertEqual(self.database.read_bytes(), b"existing projection must survive")
 
-        self.write_store({"metadata": [{"inventory_id": "inv-test", "schema_version": 7}]})
+        self.write_store({"metadata": [{"inventory_id": "inv-test", "schema_version": 8}]})
         future = self.rebuild()
         self.assertNotEqual(future.returncode, 0)
         self.assertIn("newer than supported schema", future.stderr)

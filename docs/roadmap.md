@@ -1,8 +1,9 @@
 # Roadmap and evidence gates
 
-The implementable local ledger is complete through schema v6. It is an
-agent-first evidence ledger, not a claim that object recognition, insurance
-coverage, or effortless adoption has been proven in the world.
+The implemented local ledger reaches the schema-v7 feature boundary below. It
+is an agent-first evidence ledger, not a claim that a private inventory is
+complete, object recognition is accurate, insurance coverage exists, or upkeep
+is effortless.
 
 ## Implemented and covered by code and tests
 
@@ -13,7 +14,11 @@ coverage, or effortless adoption has been proven in the world.
 - Crash-recoverable JSONL transactions, atomic proposals, media, export,
   restore, and offline replica application.
 - Separate canonical data, media, runtime, and Obsidian catalogue boundaries.
-- v1-v5 forward migration policy to current schema v6.
+- v1-v6 forward migration policy to current schema v7.
+- One arbitrary-depth spatial tree with full root-to-leaf paths, explicit
+  unknown home placement, separately evidenced current placement, and
+  evidence-backed owner, custodian, and access episodes that keep a loan from
+  spending ownership. Known quantities can be split across custodians.
 - Passive capture preparation, adapter protocol, immutable crops, duplicate
   ranking, review, and bounded proposal application.
 - Direct-current-physical-check images only for insurance photography;
@@ -53,6 +58,10 @@ source plus built wheel on Ubuntu and macOS with Python 3.11-3.14. Private data,
 runtime state, evidence media, and internal plans are excluded from the public
 package and repository. The v0.1.1 patch makes repeated catalogue regeneration
 idempotent in Obsidian vaults that automatically manage a `Created` property.
+The v0.2.0 boundary adds schema v7: arbitrary-depth location paths, independent
+home and current placement, evidence-backed parties and ownership, custody and
+access episodes, mobile container embodiments, partial custody allocations,
+and lossless v6 migration without inventing private facts.
 
 ## Next evidence campaign
 

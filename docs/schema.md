@@ -1,4 +1,4 @@
-# Schema v6
+# Schema v7
 
 Canonical data is UTF-8 JSONL in `Data/store`. SQLite and the Markdown
 catalogue are disposable projections. IDs are stable, and an unavailable value
@@ -8,6 +8,8 @@ is `null`, never a guessed default.
 |---|---|
 | `metadata` | Inventory identity and schema version. |
 | `models`, `items`, `locations` | Product identity, physical units or stock, and a location/container tree. |
+| `parties`, `item_party_relations` | Named counterparties and evidence-backed owner, custodian, and access claims. |
+| `location_embodiments` | The one-to-one link where an owned item provides a location node. |
 | `evidence`, `item_evidence`, `media_assets`, `evidence_assets` | Provenance and immutable content-addressed bytes. |
 | `interfaces`, `model_interfaces`, `relationships` | Evidence-backed compatibility claims. |
 | `aliases`, `item_tags`, `item_documents`, `valuations` | Search names and supporting facts. |
@@ -18,6 +20,20 @@ is `null`, never a guessed default.
 | `proposal_commits`, `sync_receipts` | Atomic proposal and offline-replica audit receipts. |
 | `item_amendments`, `item_detail_amendments`, `fact_amendments` | Append-only corrections to identity, item details, and current durable facts. |
 | `inventory_events` | Ordered lifecycle history. |
+
+## Space, custody and access
+
+`locations` is the only arbitrary-depth spatial tree. There is no placements table: `items.location_id` and `items.container_id` remain the single current-placement projection, and a store carrying any second placement file is rejected before a byte is read. Location kinds now span `site`, `building`, `floor`, `zone`, `room`, `furniture`, `compartment`, `container`, `vehicle`, `asset`, `place` and `unknown`; the six original kinds keep their v6 meaning.
+
+`items.home_location_id` and `items.home_container_id` say where an item belongs, which is a different fact from where it is. `null` means the home is unknown. It never means "the same as the current placement", and nothing derives one from the other. A home container must sit inside its home location.
+
+Every read that returns an item also returns `location_path` and `home_location_path`: the full root-to-leaf ancestry of the most specific placement, container before area. Scope is applied to the whole chain first, so a partly visible path is withheld rather than published with a gap; an empty path means unknown or out of scope, and the existing `location` and `container` fields still mark redaction. Location search matches the whole path, so an intermediate name need not be known, and each match carries its own `path`.
+
+Ownership, custody and access are three separate evidence-backed claims in `item_party_relations`, never one ownership state. A loan moves custody and leaves ownership untouched. Custody episodes record `loan`, `storage`, `service`, `transit`, `possession`, or honestly `unknown`, plus optional due date and quantity/unit. Multiple known partial allocations may be active, but their sum cannot exceed the item quantity; an unknown allocation cannot overlap any other active allocation. A `party` exists only when evidence names it, so an unresolved custodian is recorded with a null `party_id` rather than an invented borrower; ownership and access always name a party. An active relation cannot declare an end date. Its starting and ending evidence remain separate, and both must already support the item. Party and relation sensitivity inherit a floor from evidence, item and party.
+
+The CLI exposes these facts directly through `add-party`, `ownership-start`, `ownership-end`, `custody-start`, `custody-end`, `access-grant`, `access-revoke`, `set-home`, and `embody-location`. Each relation change appends a lifecycle event bound to the exact relation ID. The generic write-profile MCP proposal tool accepts the same commands, but only the private CLI can apply the reviewed proposal.
+
+`location_embodiments` links one owned current item to one location node, so a toolbox or a van can hold things while remaining an item. The embodied node's parent must be the item's most-specific current placement. Moving the item atomically reparents that node, so every descendant's full path follows without rewriting child items. An arrangement that puts the item inside the node it provides, directly or through another embodiment, is rejected as impossible rather than recorded.
 
 ## Evidence and lifecycle
 
@@ -54,7 +70,7 @@ is `null`, never a guessed default.
 
 ## Corrections and measurements
 
-v6 does not overwrite a material correction without a trail. Identity changes
+v7 does not overwrite a material correction without a trail. Identity changes
 append `item_amendments`; receipt, acquisition, condition, and serial changes
 append `item_detail_amendments`; other replace-or-retract changes append
 `fact_amendments`. Each records the previous value, evidence, actor, and time.
@@ -111,9 +127,6 @@ means `unknown`.
 
 ## Migration
 
-Schema v6 is current. v1, v2, v3, v4, and v5 have explicit forward migration
-paths to v6, each validated against the supported Python floor (3.11). A
-migration backs up and verifies the complete prior generation before canonical
-replacement, recovers a pending transaction first, and refuses future or
-malformed schemas without mutation. This describes code and test coverage, not
-evidence that any particular private inventory has been migrated.
+Schema v7 is current. v1, v2, v3, v4, v5, and v6 have explicit forward migration paths to v7, each validated against the supported Python floor (3.11). A migration backs up and verifies the complete prior generation before canonical replacement, recovers a pending transaction first, and refuses future or malformed schemas without mutation. This describes code and test coverage, not evidence that any particular private inventory has been migrated.
+
+The v6 step preserves every ID, evidence link, and history row unchanged. It leaves all home facts unknown, because migration cannot check where something belongs, and it creates no parties, because no legacy row names one. It does correct the one thing v6 recorded wrongly: a `lent` item was never unowned, so it becomes `confirmed` with one active custodian relation whose party and dates are null. The loan event supplies the relation's evidence when that evidence already supports the item, otherwise the item's primary evidence does. Legacy stores that still carry the `lent` ownership state stay readable.

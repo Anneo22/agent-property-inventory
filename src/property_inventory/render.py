@@ -213,6 +213,8 @@ def catalogue_digest(
         "ownership_state",
         "location",
         "container",
+        "current_location_path",
+        "home_location_path",
         "verified_on",
         "evidence_type",
         "claim_strength",
@@ -415,6 +417,15 @@ def quantity(row: dict) -> str:
 
 
 def place(row: dict) -> str:
+    current_path = text(row.get("current_location_path"))
+    home_path = text(row.get("home_location_path"))
+    if current_path or home_path:
+        parts = []
+        if current_path:
+            parts.append(f"Current: {current_path}")
+        if home_path:
+            parts.append(f"Home: {home_path}")
+        return "; ".join(parts)
     location = text(row["location"])
     container = text(row["container"])
     if location and container and location != container:
@@ -907,6 +918,7 @@ def inventory_rows(con: sqlite3.Connection, scope_rank: int) -> list[dict]:
           WHERE instr(tree.trail, ',' || parent.location_id || ',')=0
         )
         SELECT i.item_id, i.model_id, i.location_id, i.container_id,
+               i.home_location_id, i.home_container_id,
                CASE WHEN {sensitivity_predicate('COALESCE(i.identity_sensitivity, i.sensitivity)')}
                     THEN m.name ELSE '[identity redacted]' END AS name,
                CASE WHEN {sensitivity_predicate('COALESCE(i.identity_sensitivity, i.sensitivity)')}
@@ -914,6 +926,10 @@ def inventory_rows(con: sqlite3.Connection, scope_rank: int) -> list[dict]:
                i.quantity, i.unit, i.ownership_state,
                {visible_location('i.location_id', 'location.name')} AS location,
                {visible_location('i.container_id', 'container.name')} AS container,
+               {visible_location('COALESCE(i.container_id, i.location_id)', 'current_path.path_text')}
+                    AS current_location_path,
+               {visible_location('COALESCE(i.home_container_id, i.home_location_id)', 'home_path.path_text')}
+                    AS home_location_path,
                i.verified_on, i.sensitivity,
                CASE WHEN {sensitivity_predicate('e.sensitivity')}
                     THEN e.evidence_type ELSE '[redacted]' END AS evidence_type,
@@ -934,10 +950,16 @@ def inventory_rows(con: sqlite3.Connection, scope_rank: int) -> list[dict]:
         JOIN evidence e ON e.evidence_id=i.primary_evidence_id
         LEFT JOIN locations location ON location.location_id=i.location_id
         LEFT JOIN locations container ON container.location_id=i.container_id
+        LEFT JOIN v_location_paths current_path
+          ON current_path.location_id=COALESCE(i.container_id, i.location_id)
+        LEFT JOIN v_location_paths home_path
+          ON home_path.location_id=COALESCE(i.home_container_id, i.home_location_id)
         WHERE {sensitivity_predicate('i.sensitivity')}
         ORDER BY i.item_id
         """,
         (
+            scope_rank,
+            scope_rank,
             scope_rank,
             scope_rank,
             scope_rank,
@@ -1156,7 +1178,12 @@ def _attach_private_audit_history(
     item_locations: dict[str, set[str]] = {}
     for row in inventory:
         locations: set[str] = set()
-        for location_id in (row.get("location_id"), row.get("container_id")):
+        for location_id in (
+            row.get("location_id"),
+            row.get("container_id"),
+            row.get("home_location_id"),
+            row.get("home_container_id"),
+        ):
             while location_id is not None and location_id not in locations:
                 locations.add(location_id)
                 location_id = location_parents.get(location_id)

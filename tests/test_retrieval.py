@@ -280,6 +280,7 @@ class RetrievalTest(unittest.TestCase):
                         "ownership": "candidate",
                         "condition": "new",
                         "location": "Workshop",
+                        "location_path": "Workshop",
                         "last_physical_check_on": None,
                         "evidence_types": ["merchant_account"],
                     }

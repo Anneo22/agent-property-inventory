@@ -467,19 +467,20 @@ class DoctorTest(unittest.TestCase):
 class CompatibilityPolicyTest(unittest.TestCase):
     def test_matrix_accepts_current_and_supported_migrations(self) -> None:
         matrix = compatibility_matrix((3, 11))
-        self.assertEqual(matrix.current_schema_version, 6)
+        self.assertEqual(matrix.current_schema_version, 7)
         self.assertEqual(
-            [entry.schema_version for entry in matrix.entries], [1, 2, 3, 4, 5, 6]
+            [entry.schema_version for entry in matrix.entries], [1, 2, 3, 4, 5, 6, 7]
         )
-        self.assertEqual(matrix.entry_for(4).action, "migrate_v4_to_v6")
+        self.assertEqual(matrix.entry_for(4).action, "migrate_v4_to_v7")
         self.assertEqual(
             validate_migration(1, python_version=(3, 11)).action,
-            "migrate_v1_to_v6",
+            "migrate_v1_to_v7",
         )
-        self.assertEqual(validate_migration(6, python_version=(3, 11)).action, "read_current")
+        self.assertEqual(validate_migration(6, python_version=(3, 11)).action, "migrate_v6_to_v7")
+        self.assertEqual(validate_migration(7, python_version=(3, 11)).action, "read_current")
 
     def test_policy_rejects_unsupported_schemas_targets_and_python(self) -> None:
-        for version in (0, 7, True, "6"):
+        for version in (0, 8, True, "7"):
             with self.assertRaises(CompatibilityError):
                 validate_schema(version)
         with self.assertRaises(CompatibilityError):
@@ -487,11 +488,11 @@ class CompatibilityPolicyTest(unittest.TestCase):
         with self.assertRaisesRegex(CompatibilityError, "requires >= 3.11"):
             validate_runtime((3, 10))
         self.assertFalse(any(entry.supported for entry in compatibility_matrix((3, 10)).entries))
-        with patch.object(compatibility_policy, "SCHEMA_VERSION", 7):
+        with patch.object(compatibility_policy, "SCHEMA_VERSION", 8):
             with self.assertRaisesRegex(CompatibilityError, "explicitly updated"):
                 compatibility_policy.compatibility_matrix((3, 11))
             with self.assertRaisesRegex(CompatibilityError, "explicitly updated"):
-                validate_schema(6)
+                validate_schema(7)
 
 
 if __name__ == "__main__":

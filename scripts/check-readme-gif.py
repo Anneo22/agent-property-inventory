@@ -28,7 +28,7 @@ def validate_gif(path: Path) -> tuple[int, int]:
         duration = sum(
             image.seek(index) or image.info.get("duration", 0) for index in range(frames)
         )
-    if not 160 <= frames <= 210 or not 6_500 <= duration <= 8_000:
+    if not 135 <= frames <= 170 or not 5_500 <= duration <= 6_500:
         raise SystemExit("README GIF has an unexpected frame count or duration")
     return frames, duration
 
@@ -74,16 +74,18 @@ def main() -> None:
         OUTPUT,
         'Set Width 1600',
         'Set Height 1080',
+        'Set FontSize 34',
         'Set TypingSpeed 0ms',
         'Set CursorBlink false',
         'Type "set -e" Enter',
         '"cursor": "#101216"',
         '"cursorAccent": "#101216"',
         'Type "clear" Enter',
+        'Type "# Ask: Do I own a T25 bit, and exactly where is it?" Enter',
         'Type "property-inventory "',
         'Type "search "',
         'Type "\'T25\' "',
-        'Type "--summary" Enter',
+        'Type "--summary | jq -C \'.matches[0]\'" Enter',
     )
     if (
         source.count(OUTPUT) != 1

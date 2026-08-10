@@ -20,12 +20,12 @@ V2_TABLES = cli_module.V2_TABLES
 V3_TABLES = cli_module.V3_TABLES
 V4_TABLES = cli_module.V4_TABLES
 V5_TABLES = cli_module.V5_TABLES
-V6_TABLES = cli_module.V6_TABLES
-POST_V1_TABLES = tuple(table for table in V6_TABLES if table not in V1_TABLES)
-POST_V2_TABLES = tuple(table for table in V6_TABLES if table not in V2_TABLES)
-POST_V3_TABLES = tuple(table for table in V6_TABLES if table not in V3_TABLES)
-POST_V4_TABLES = tuple(table for table in V6_TABLES if table not in V4_TABLES)
-POST_V5_TABLES = tuple(table for table in V6_TABLES if table not in V5_TABLES)
+V7_TABLES = cli_module.V7_TABLES
+POST_V1_TABLES = tuple(table for table in V7_TABLES if table not in V1_TABLES)
+POST_V2_TABLES = tuple(table for table in V7_TABLES if table not in V2_TABLES)
+POST_V3_TABLES = tuple(table for table in V7_TABLES if table not in V3_TABLES)
+POST_V4_TABLES = tuple(table for table in V7_TABLES if table not in V4_TABLES)
+POST_V5_TABLES = tuple(table for table in V7_TABLES if table not in V5_TABLES)
 
 
 class CliCase(unittest.TestCase):
@@ -139,10 +139,10 @@ class MigrationTest(CliCase):
 
         migrated = self.cli("migrate")
         self.assertEqual(migrated["result"]["from_schema"], 1)
-        self.assertEqual(migrated["result"]["to_schema"], 6)
+        self.assertEqual(migrated["result"]["to_schema"], 7)
         self.assertTrue(Path(migrated["backup"]).is_dir())
         metadata = json.loads((self.store / "metadata.jsonl").read_text())
-        self.assertEqual(metadata["schema_version"], 6)
+        self.assertEqual(metadata["schema_version"], 7)
         self.assertTrue(metadata["inventory_id"].startswith("inv-"))
 
         for table in V1_TABLES:
@@ -197,10 +197,10 @@ class MigrationTest(CliCase):
 
         migrated = self.cli("migrate")
         self.assertEqual(migrated["result"]["from_schema"], 2)
-        self.assertEqual(migrated["result"]["to_schema"], 6)
+        self.assertEqual(migrated["result"]["to_schema"], 7)
         current = json.loads(metadata_path.read_text())
         self.assertEqual(current["inventory_id"], inventory_id)
-        self.assertEqual(current["schema_version"], 6)
+        self.assertEqual(current["schema_version"], 7)
         self.assertEqual((self.store / "proposal_commits.jsonl").read_text(), "")
         self.assertEqual(
             {
@@ -230,8 +230,8 @@ class MigrationTest(CliCase):
 
         migrated = self.cli("migrate")
         self.assertEqual(migrated["result"]["from_schema"], 3)
-        self.assertEqual(migrated["result"]["to_schema"], 6)
-        self.assertEqual(json.loads(metadata_path.read_text())["schema_version"], 6)
+        self.assertEqual(migrated["result"]["to_schema"], 7)
+        self.assertEqual(json.loads(metadata_path.read_text())["schema_version"], 7)
         for table in POST_V3_TABLES:
             self.assertEqual((self.store / f"{table}.jsonl").read_text(), "")
         self.assertEqual(
@@ -302,7 +302,7 @@ class MigrationTest(CliCase):
 
         migrated = self.cli("migrate")
         self.assertEqual(migrated["result"]["from_schema"], 4)
-        self.assertEqual(migrated["result"]["to_schema"], 6)
+        self.assertEqual(migrated["result"]["to_schema"], 7)
         session = json.loads((self.store / "capture_sessions.jsonl").read_text())
         self.assertEqual(session["provenance_state"], "legacy_unbound")
         for field in (
@@ -359,7 +359,7 @@ class MigrationTest(CliCase):
 
         migrated = self.cli("migrate")
         self.assertEqual(migrated["result"]["from_schema"], 5)
-        self.assertEqual(migrated["result"]["to_schema"], 6)
+        self.assertEqual(migrated["result"]["to_schema"], 7)
         self.assertEqual(migrated["result"]["inventory_id"], metadata["inventory_id"])
         current_item = self.cli("show", ordered["item_id"])["item"]
         self.assertEqual(current_item["identity_sensitivity"], current_item["sensitivity"])
@@ -422,7 +422,7 @@ class MigrationTest(CliCase):
 
         migrated = self.cli("migrate")
         self.assertEqual(migrated["result"]["from_schema"], 3)
-        self.assertEqual(migrated["result"]["to_schema"], 6)
+        self.assertEqual(migrated["result"]["to_schema"], 7)
         self.assertEqual(self.cli("show", item_id)["item"]["item_id"], item_id)
 
     def test_v3_shared_evidence_backfill_uses_the_highest_supported_item_sensitivity(self) -> None:
@@ -593,13 +593,13 @@ class MigrationTest(CliCase):
         for command in (("status",), ("migrate",), ("search", "anything")):
             with self.subTest(command=command):
                 failure = self.cli_fails(*command)
-                self.assertIn("newer than supported schema 6", failure["error"])
+                self.assertIn("newer than supported schema 7", failure["error"])
                 self.assertEqual(
                     {path.name: path.read_bytes() for path in sorted(self.store.glob("*.jsonl"))},
                     before,
                 )
 
-        metadata["schema_version"] = 6
+        metadata["schema_version"] = 7
         metadata_path.write_text(json.dumps(metadata, sort_keys=True) + "\n")
         workspace = self.runtime / ".property-inventory-transaction"
         workspace.mkdir()

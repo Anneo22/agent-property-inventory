@@ -13,7 +13,7 @@ The default is `--profile read --scope personal`:
 | `get_upkeep_report` | Return scope-safe observed upkeep records and counts. |
 | `search_inventory` | Query before ownership or purchase claims, with the CLI's typed retrieval filters. |
 | `list_inventory_items` | Enumerate scope-visible items with typed filters and opaque cursor pagination. |
-| `list_inventory_locations` | List or resolve scope-visible places, rooms, containers, vehicles, and assets with cursor pagination. |
+| `list_inventory_locations` | List or resolve scope-visible spatial nodes, from a site down to a compartment, each with its full root-to-leaf path, with cursor pagination. The query matches the whole path. |
 | `inventory_task_context` | Return task-scoped matches and explicit unknown fields. |
 | `get_inventory_item` | Read one visible item with evidence, event, relationship, compatibility, kit, and amendment context. |
 | `get_kit_status` | Return conservative requirement and reviewed readiness for a visible kit or served item. |
@@ -40,6 +40,13 @@ Private scope also permits `show_inventory_proposal` and `capture_status`, which
 There are no direct order, receive, move, sell, physical-check, maintenance,
 proposal-apply, sync-apply or deletion tools. Preparation writes reviewable
 runtime state but does not change JSONL.
+
+`prepare_inventory_proposal` accepts the supported CLI operations as argument
+arrays. This includes arbitrary-depth `add-location`, `set-home`, `add-party`,
+`ownership-start` / `ownership-end`, `custody-start` / `custody-end`,
+`access-grant` / `access-revoke`, and `embody-location`. The returned proposal
+is only staged runtime state. A separate private CLI caller must inspect it with
+`proposal-show` and commit it with `proposal-apply`; no MCP tool can apply it.
 
 `search_inventory` and `inventory_task_context` call the same retrieval module as the CLI. Their optional filters are `category`, `ownership_state`, `condition`, `location`, `tag`, `alias_kind`, `interface_family`, `interface_standard`, `interface_variant`, `interface_direction`, and `location_known` (`known` or `unknown`). Matching is case- and punctuation-insensitive. Scope filtering precedes matching, counting, and IDs, including aliases, serials, normalized-interface evidence, and location hierarchies. An empty result always means `unknown, not absent`.
 

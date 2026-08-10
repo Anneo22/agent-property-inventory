@@ -4,6 +4,7 @@ set -eu
 pattern='/Users/[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+|[A-Za-z0-9._%+-]+@(?!(?:example\.invalid)\b)[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
 
 if rg --text --pcre2 -n --hidden "$pattern" \
+    -g '!.git' \
     -g '!.git/**' \
     -g '!docs/assets/property-inventory-demo.gif' \
     -g '!docs/assets/physical-memory.gif' \

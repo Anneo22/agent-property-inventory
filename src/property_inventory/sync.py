@@ -52,6 +52,9 @@ _IDENTITY_FIELDS: dict[str, tuple[str, ...]] = {
     "item_amendments": ("amendment_id",),
     "item_detail_amendments": ("detail_amendment_id",),
     "fact_amendments": ("fact_amendment_id",),
+    "parties": ("party_id",),
+    "item_party_relations": ("relation_id",),
+    "location_embodiments": ("embodiment_id",),
     "inventory_events": ("event_id",),
 }
 _ITEM_SEMANTIC_FIELDS = ("ownership_state", "location_id", "container_id", "quantity")
@@ -85,6 +88,11 @@ _IMMUTABLE_REPLICA_BASE_TABLES = frozenset(
         "capture_observations",
         "maintenance_sessions",
         "maintenance_session_items",
+        # Custody, ownership, access and embodiment have no offline write path
+        # yet, so a replica may discover new rows but never rewrite one.
+        "parties",
+        "item_party_relations",
+        "location_embodiments",
     }
 )
 _FACT_AMENDMENT_TABLES = frozenset(
@@ -100,6 +108,9 @@ _FACT_AMENDMENT_TABLES = frozenset(
         "model_interfaces",
         "valuations",
         "item_documents",
+        "parties",
+        "item_party_relations",
+        "location_embodiments",
     }
 )
 _ITEM_LIFECYCLE_FIELDS = frozenset(
@@ -148,6 +159,8 @@ _ITEM_DETAIL_AMENDMENT_FIELDS = frozenset(
     {
         "acquired_on",
         "condition",
+        "home_container_id",
+        "home_location_id",
         "purchase_currency",
         "purchase_price",
         "receipt_ref",
@@ -1067,6 +1080,8 @@ def _validate_new_item_creation(
             raise SyncError(f"replica new item {item_id!r} has invalid detail history")
         initial_details = decoded_previous
     always_empty = {
+        "home_container_id": initial_details.get("home_container_id"),
+        "home_location_id": initial_details.get("home_location_id"),
         "replacement_value": item.get("replacement_value"),
         "value_currency": item.get("value_currency"),
     }

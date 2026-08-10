@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 from collections.abc import Iterable, Mapping
+from datetime import date
 from typing import Any
 
 SENSITIVITY_RANK = {"low": 0, "personal": 1, "high": 2}
@@ -169,6 +170,27 @@ def visible_location_chain(
         chain.append(location)
         location = locations.get(location.get("parent_location_id"))
     return chain
+
+
+def visible_location_path(
+    locations: dict[str, dict[str, Any]], location_id: str | None, scope: str
+) -> list[dict[str, Any]]:
+    """Return the full root-to-leaf ancestry, empty when unknown or out of scope.
+
+    Scope is applied to the whole chain before anything is serialized, so a
+    partially visible path is withheld rather than published with a gap.
+    """
+    return [
+        {"kind": row["kind"], "location_id": row["location_id"], "name": row["name"]}
+        for row in reversed(visible_location_chain(locations, location_id, scope))
+    ]
+
+
+def most_specific_placement(
+    item: dict[str, Any], *, prefix: str = ""
+) -> str | None:
+    """Prefer the container over the area, because a drawer beats a room."""
+    return item.get(f"{prefix}container_id") or item.get(f"{prefix}location_id")
 
 
 def location_state(
@@ -408,7 +430,21 @@ def item_context(store: Any, item: dict[str, Any], *, scope: str = "private") ->
     }
     location_chain = visible_location_chain(locations, item.get("location_id"), scope)
     container_chain = visible_location_chain(locations, item.get("container_id"), scope)
-
+    location_path = visible_location_path(locations, most_specific_placement(item), scope)
+    home_location_path = visible_location_path(
+        locations, most_specific_placement(item, prefix="home_"), scope
+    )
+    parties_by_id = {row["party_id"]: row for row in store.rows.get("parties", [])}
+    party_relations = [
+        dict(row) for row in store.rows.get("item_party_relations", [])
+        if row.get("item_id") == item["item_id"] and scope_allows(scope, row.get("sensitivity"))
+    ]
+    for relation in party_relations:
+        party = parties_by_id.get(relation.get("party_id"))
+        if party is not None and scope_allows(scope, party.get("sensitivity")):
+            relation["party"] = {"party_id": party["party_id"], "name": party["name"], "party_kind": party["party_kind"]}
+        else:
+            relation["party"] = None
     def fact_amendment_mentions_item(row: dict[str, Any]) -> bool:
         facts: list[dict[str, Any]] = []
         for field in ("previous_json", "replacement_json"):
@@ -477,6 +513,11 @@ def item_context(store: Any, item: dict[str, Any], *, scope: str = "private") ->
     if item.get("container_id") is not None and not container_chain:
         item_view["container_id"] = None
         container_name = "[redacted]"
+    for field in ("home_location_id", "home_container_id"):
+        if item.get(field) is not None and not visible_location_chain(
+            locations, item[field], scope
+        ):
+            item_view[field] = None
     if scope != "private":
         for field in (
             "notes",
@@ -534,6 +575,43 @@ def item_context(store: Any, item: dict[str, Any], *, scope: str = "private") ->
         ]
         item_detail_amendments = []
         fact_amendments = []
+        party_relations = [
+            {**relation, "party_id": None, "evidence_id": None,
+             "ended_evidence_id": None, "notes": None,
+             "party": ({"party_id": None, "name": "[redacted]", "party_kind": None} if relation.get("party") else None)}
+            for relation in party_relations
+        ]
+    active_loans = [
+        relation
+        for relation in party_relations
+        if relation.get("role") == "custodian"
+        and relation.get("status") == "active"
+        and relation.get("custody_kind") == "loan"
+    ]
+    custody_summary = {
+        "owners": [
+            relation
+            for relation in party_relations
+            if relation.get("role") == "owner" and relation.get("status") == "active"
+        ],
+        "custodians": [
+            relation
+            for relation in party_relations
+            if relation.get("role") == "custodian" and relation.get("status") == "active"
+        ],
+        "access": [
+            relation
+            for relation in party_relations
+            if relation.get("role") == "access" and relation.get("status") == "active"
+        ],
+        "active_loans": active_loans,
+        "overdue_loans": [
+            relation
+            for relation in active_loans
+            if isinstance(relation.get("due_on"), str)
+            and relation["due_on"] < date.today().isoformat()
+        ],
+    }
     if not identity_visible:
         item_view["model_id"] = None
         model_view = {
@@ -564,6 +642,11 @@ def item_context(store: Any, item: dict[str, Any], *, scope: str = "private") ->
         "model": model_view,
         "location": location_name,
         "container": container_name,
+        "location_path": location_path,
+        "current_location_path": location_path,
+        "home_location_path": home_location_path,
+        "party_relations": party_relations,
+        "custody": custody_summary,
         "evidence_ids": evidence_ids,
         "evidence": evidence_records,
         "events": events,
@@ -711,7 +794,12 @@ def _haystack(store: Any, item: dict[str, Any], model: dict[str, Any], scope: st
     )
     location_values = [
         value
-        for location_id in (item.get("location_id"), item.get("container_id"))
+        for location_id in (
+            item.get("location_id"),
+            item.get("container_id"),
+            item.get("home_location_id"),
+            item.get("home_container_id"),
+        )
         for location in visible_location_chain(locations, location_id, scope)
         for value in (location["location_id"], location["name"])
     ]

@@ -13,7 +13,7 @@ renders the configured catalogue, runs the semantic verifier, and runs
 before it returns.
 
 `compatibility-status` reports the executable Python floor and every explicit
-v1-v5-to-v6 action. It does not report that an inventory has been migrated.
+v1-v6-to-v7 action. It does not report that an inventory has been migrated.
 Future schemas are refused until the policy is deliberately extended.
 
 ## Boundaries and configuration
@@ -67,7 +67,9 @@ property-inventory --scope private runtime-rebind \
 
 Use a physical-check command only for a real current check. It creates the
 required `physical_check` / `explicit_current` evidence and matching lifecycle
-event. A passive overview capture or an import must not be used as a substitute.
+event. It confirms physical presence, not ownership by itself: an item already
+recorded as `unknown` or `not_owned` keeps that state. A passive overview
+capture or an import must not be used as a substitute.
 
 An unknown historical event date is recorded with a null `occurred_on`,
 `occurred_on_precision: unknown`, and the required `observed_on`. The observation
@@ -83,10 +85,38 @@ quantity must be supplied again. Omit condition when function was not checked;
 the operational answer will remain unknown. Add later acquisition or receipt
 facts through `enrich-item` with their own evidence.
 
-v6 corrections preserve their predecessor. Use identity correction for a model
+v7 corrections preserve their predecessor. Use identity correction for a model
 mistake, `enrich-item` for supported item details, and `amend-fact` to replace
 or retract a current durable fact. All need evidence, actor, and amendment date.
 Append item dimensions instead of overwriting a prior measurement.
+
+## Location, home, ownership, custody, and access
+
+`locations` is one tree with arbitrary depth. Add each node under its real
+parent, from a site or vehicle down through rooms, furniture, drawers, bags,
+boxes, and sections. Reads return the full root-to-leaf path. Current placement
+and usual home are independent:
+
+```bash
+property-inventory set-home --actor "Owner" --source-ref "Usual storage checked" \
+  --item-id itm-example --set-on 2026-08-10 \
+  --location-id loc-study --container-id loc-rear-section
+property-inventory move --actor "Owner" --source-ref "Left for service" \
+  --item-id itm-example --moved-on 2026-08-11 \
+  --location-id loc-repair-shop
+```
+
+Use `set-home --clear` when the former home is no longer true and the new one is
+unknown. Do not copy current placement into home as a default.
+
+Named people, households, and organisations are parties, not locations.
+`ownership-start` / `ownership-end`, `custody-start` / `custody-end`, and
+`access-grant` / `access-revoke` keep separate evidence-backed episodes. A loan
+does not change ownership. Partial custody rows may split a known quantity
+between several parties, but their sum cannot exceed the item quantity. An
+unknown allocation cannot overlap another active allocation. The compatibility
+aliases `change --event-type lent` and `return-loan` remain for one whole-item
+loan; use the custody commands for named parties or partial quantities.
 
 ```bash
 property-inventory add-item-dimensions --item-id itm-example \

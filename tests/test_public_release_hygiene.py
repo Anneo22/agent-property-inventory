@@ -69,6 +69,12 @@ class PublicReleaseHygieneTests(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("Cannot scan the public working tree", completed.stderr)
 
+    def test_working_tree_scanner_excludes_linked_worktree_git_pointer(self) -> None:
+        source = LEAK_CHECK.read_text(encoding="utf-8")
+
+        self.assertIn("-g '!.git'", source)
+        self.assertIn("-g '!.git/**'", source)
+
     def test_geojson_fixture_is_an_approved_utf8_text_type(self) -> None:
         temporary, repository = self._repository()
         self.addCleanup(temporary.cleanup)

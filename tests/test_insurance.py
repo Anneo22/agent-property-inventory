@@ -521,14 +521,16 @@ class InsurancePackageTests(unittest.TestCase):
         reconstructed = [json.loads(row["item_json"]) for row in rows]
         self.assertEqual(reconstructed, report["items"])
 
-    def test_lent_item_package_round_trips_with_custody_and_ownership(self) -> None:
+    def test_external_custody_keeps_ownership_but_is_not_present(self) -> None:
         rows = base_rows()
-        visible = next(item for item in rows["items"] if item["item_id"] == "item-visible")
-        visible["ownership_state"] = "lent"
+        rows["item_party_relations"] = [{
+            "item_id": "item-visible", "role": "custodian", "status": "active",
+            "custody_kind": "loan",
+        }]
         report = insurance_report(rows, verified_media_asset_ids={"asset-photo"})
         item = next(item for item in report["items"] if item["item_id"] == "item-visible")
-        self.assertEqual(item["ownership_state"], "lent")
-        self.assertEqual(item["fields"]["custody"], {"state": "present"})
+        self.assertEqual(item["ownership_state"], "confirmed")
+        self.assertEqual(item["fields"]["custody"], {"state": "unknown"})
         package = build_insurance_package(report, {"asset-photo": PHOTO_BYTES})
         self.assertEqual(validate_insurance_package(package), report)
 

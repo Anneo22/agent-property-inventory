@@ -53,16 +53,27 @@ def demo_result() -> dict:
     with tempfile.TemporaryDirectory(prefix="property-inventory-readme-") as temporary:
         environment = clean_environment(Path(temporary))
         run_cli(environment, "init")
-        run_cli(
-            environment,
-            "add-location",
-            "--location-id",
-            "loc-tool-drawer",
-            "--name",
-            "Tool drawer",
-            "--kind",
-            "container",
-        )
+        parent = None
+        for location_id, name, kind in (
+            ("loc-cambridge-home", "Cambridge home", "site"),
+            ("loc-study", "Study", "room"),
+            ("loc-drawer-unit", "Drawer unit", "furniture"),
+            ("loc-second-drawer", "Second drawer", "compartment"),
+            ("loc-rear-section", "Rear section", "compartment"),
+        ):
+            arguments = [
+                "add-location",
+                "--location-id",
+                location_id,
+                "--name",
+                name,
+                "--kind",
+                kind,
+            ]
+            if parent is not None:
+                arguments.extend(("--parent-location-id", parent))
+            run_cli(environment, *arguments)
+            parent = location_id
         run_cli(
             environment,
             "discover",
@@ -77,7 +88,9 @@ def demo_result() -> dict:
             "--checked-on",
             "2026-08-09",
             "--location-id",
-            "loc-tool-drawer",
+            "loc-study",
+            "--container-id",
+            "loc-rear-section",
             "--new-model",
             "--new-unit",
             "--brand",
@@ -118,9 +131,33 @@ def expected_block() -> str:
 def expected_capture_block() -> str:
     return """```bash
 property-inventory add-location \\
-  --location-id loc-tool-drawer \\
-  --name "Tool drawer" \\
-  --kind container
+  --location-id loc-cambridge-home \\
+  --name "Cambridge home" \\
+  --kind site
+
+property-inventory add-location \\
+  --location-id loc-study \\
+  --parent-location-id loc-cambridge-home \\
+  --name "Study" \\
+  --kind room
+
+property-inventory add-location \\
+  --location-id loc-drawer-unit \\
+  --parent-location-id loc-study \\
+  --name "Drawer unit" \\
+  --kind furniture
+
+property-inventory add-location \\
+  --location-id loc-second-drawer \\
+  --parent-location-id loc-drawer-unit \\
+  --name "Second drawer" \\
+  --kind compartment
+
+property-inventory add-location \\
+  --location-id loc-rear-section \\
+  --parent-location-id loc-second-drawer \\
+  --name "Rear section" \\
+  --kind compartment
 
 property-inventory discover \\
   --actor "Owner" \\
@@ -128,7 +165,8 @@ property-inventory discover \\
   --name "T25 Torx bit" \\
   --category tool \\
   --checked-on "$(date +%F)" \\
-  --location-id loc-tool-drawer \\
+  --location-id loc-study \\
+  --container-id loc-rear-section \\
   --new-model \\
   --new-unit \\
   --brand Wera \\

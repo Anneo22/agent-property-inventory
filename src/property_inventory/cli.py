@@ -87,7 +87,13 @@ from .media_validation import (
     normalized_media_type,
     validate_declared_media,
 )
-from .rebuild import SCHEMA_VERSION, capture_provenance_failures, location_assignment_error
+from .rebuild import (
+    CONTAINER_LOCATION_KINDS,
+    LOCATION_KINDS,
+    SCHEMA_VERSION,
+    capture_provenance_failures,
+    location_assignment_error,
+)
 from .render import catalogue_created_on, write_output_atomic
 from .retrieval import (
     RetrievalError,
@@ -234,7 +240,14 @@ V6_TABLES = (
     "fact_amendments",
     "inventory_events",
 )
-TABLES = V6_TABLES
+V7_TABLES = (
+    *V6_TABLES[:-1],
+    "parties",
+    "item_party_relations",
+    "location_embodiments",
+    "inventory_events",
+)
+TABLES = V7_TABLES
 TABLES_BY_SCHEMA = {
     1: V1_TABLES,
     2: V2_TABLES,
@@ -242,6 +255,7 @@ TABLES_BY_SCHEMA = {
     4: V4_TABLES,
     5: V5_TABLES,
     6: V6_TABLES,
+    7: V7_TABLES,
 }
 ID_FIELDS = {
     "metadata": "inventory_id",
@@ -268,9 +282,29 @@ ID_FIELDS = {
     "item_detail_amendments": "detail_amendment_id",
     "fact_amendments": "fact_amendment_id",
     "kit_reviews": "review_id",
+    "parties": "party_id",
+    "item_party_relations": "relation_id",
+    "location_embodiments": "embodiment_id",
     "inventory_events": "event_id",
 }
 SENSITIVITY_RANK = {"low": 0, "personal": 1, "high": 2}
+# Broad to narrow, so `--help` reads as the tree it describes.
+LOCATION_KIND_CHOICES = (
+    "site",
+    "place",
+    "building",
+    "floor",
+    "zone",
+    "room",
+    "furniture",
+    "compartment",
+    "container",
+    "vehicle",
+    "asset",
+    "unknown",
+)
+if set(LOCATION_KIND_CHOICES) != LOCATION_KINDS:
+    raise RuntimeError("CLI location kinds drifted from the canonical schema kinds")
 SPATIAL_EVIDENCE_CLAIMS = {
     "physical_check": "explicit_current",
     "research": "research_only",
@@ -290,6 +324,9 @@ FACT_SELECTOR_FIELDS = {
     "valuations": ("valuation_id",),
     "item_documents": ("document_id",),
     "item_dimensions": ("dimension_id",),
+    "parties": ("party_id",),
+    "item_party_relations": ("relation_id",),
+    "location_embodiments": ("embodiment_id",),
 }
 ITEM_DETAIL_FIELDS = (
     "acquired_on",
@@ -298,6 +335,11 @@ ITEM_DETAIL_FIELDS = (
     "purchase_price",
     "receipt_ref",
     "serial_or_lot",
+    "home_location_id",
+    "home_container_id",
+)
+ENRICH_ITEM_DETAIL_FIELDS = tuple(
+    field for field in ITEM_DETAIL_FIELDS if not field.startswith("home_")
 )
 REACQUISITION_RESET_FIELDS = (
     "acquired_on",
@@ -1501,6 +1543,10 @@ class Store:
         ]
         if len(maintenance_items) != len(set(maintenance_items)):
             raise InventoryError("duplicate maintenance session item link")
+        for side in ("item_id", "location_id"):
+            embodiments = [row.get(side) for row in self.rows["location_embodiments"]]
+            if len(embodiments) != len(set(embodiments)):
+                raise InventoryError(f"duplicate location embodiment {side}")
         sequences = [row.get("sequence") for row in self.rows["inventory_events"]]
         if any(not isinstance(sequence, int) or sequence < 1 for sequence in sequences):
             raise InventoryError("inventory event sequence must be a positive integer")
@@ -3107,7 +3153,7 @@ def command_migrate(args: argparse.Namespace) -> dict:
             raise InventoryError(
                 f"inventory schema {source_version} is newer than supported schema {SCHEMA_VERSION}"
             )
-        if source_version not in {1, 2, 3, 4, 5}:
+        if source_version not in {1, 2, 3, 4, 5, 6}:
             raise InventoryError(f"unsupported migration source schema: {source_version}")
     else:
         source_version = 1
@@ -3125,7 +3171,7 @@ def command_migrate(args: argparse.Namespace) -> dict:
             )
 
     def mutate(store: Store) -> dict:
-        if store.schema_version not in {1, 2, 3, 4, 5}:
+        if store.schema_version not in {1, 2, 3, 4, 5, 6}:
             raise InventoryError(f"unsupported migration source schema: {store.schema_version}")
         from_schema = store.schema_version
         if from_schema == 1:
@@ -3308,11 +3354,83 @@ def command_migrate(args: argparse.Namespace) -> dict:
                 )
             for path in store.rows["torque_paths"]:
                 ensure_support(path["evidence_id"], path["tool_item_id"])
+        corrected_loans = 0
+        if from_schema < 7:
+            item_evidence_links = {
+                (row["item_id"], row["evidence_id"]) for row in store.rows["item_evidence"]
+            }
+            loan_evidence: dict[str, str] = {}
+            for event in sorted(
+                store.rows["inventory_events"], key=lambda row: row.get("sequence", 0)
+            ):
+                if event["event_type"] == "lent" and event.get("evidence_id") is not None:
+                    loan_evidence[event["item_id"]] = event["evidence_id"]
+            for item in store.rows["items"]:
+                # A home is a separate, checked fact. Migration cannot know it,
+                # and the current placement is not evidence for it.
+                item["home_location_id"] = None
+                item["home_container_id"] = None
+                if item["ownership_state"] != "lent":
+                    continue
+                # v6 spent ownership to express a loan. v7 keeps the item owned
+                # and records custody as elsewhere, with nobody invented.
+                item_id = item["item_id"]
+                evidence_id = loan_evidence.get(item_id, item["primary_evidence_id"])
+                if (item_id, evidence_id) not in item_evidence_links:
+                    evidence_id = item["primary_evidence_id"]
+                item["ownership_state"] = "confirmed"
+                store.rows["item_party_relations"].append(
+                    {
+                        "custody_kind": "loan",
+                        "due_on": None,
+                        "ended_on": None,
+                        "ended_evidence_id": None,
+                        "evidence_id": evidence_id,
+                        "item_id": item_id,
+                        "notes": (
+                            "Migrated legacy loan; ownership was never transferred and "
+                            "the custodian was never recorded."
+                        ),
+                        "party_id": None,
+                        "relation_id": store.allocate(
+                            "item_party_relations", f"rel-custody-{item_id}"
+                        ),
+                        "role": "custodian",
+                        "quantity": None,
+                        "sensitivity": max(
+                            (
+                                item["sensitivity"],
+                                evidence_by_id[evidence_id]["sensitivity"],
+                            ),
+                            key=SENSITIVITY_RANK.__getitem__,
+                        ),
+                        "started_on": None,
+                        "status": "active",
+                        "unit": None,
+                    }
+                )
+                corrected_loans += 1
+            for amendment in store.rows["item_detail_amendments"]:
+                previous = strict_json_loads(amendment["previous_json"], label="legacy item detail amendment")
+                if not isinstance(previous, dict):
+                    raise InventoryError("legacy item detail amendment is malformed")
+                previous.setdefault("home_location_id", None)
+                previous.setdefault("home_container_id", None)
+                amendment["previous_json"] = strict_json_dumps(previous, sort_keys=True)
+        for relation in store.rows["item_party_relations"]:
+            # v7 beta rows did not record episode detail. Preserve unknown rather
+            # than fabricating a loan, party, date, amount, or unit.
+            relation.setdefault("custody_kind", "unknown" if relation.get("role") == "custodian" else None)
+            relation.setdefault("due_on", None)
+            relation.setdefault("ended_evidence_id", None)
+            relation.setdefault("quantity", None)
+            relation.setdefault("unit", None)
         store.schema_version = SCHEMA_VERSION
         return {
             "from_schema": from_schema,
             "to_schema": SCHEMA_VERSION,
             "inventory_id": inventory_id,
+            "corrected_loan_custody_rows": corrected_loans,
             "preserved_v1_rows": {table: len(store.rows[table]) for table in V1_TABLES},
         }
 
@@ -6227,17 +6345,58 @@ def torque_path_decision(path: dict, requested_nm: float) -> tuple[str, str]:
     return "safe", "requested torque is within every recorded direct-path limit"
 
 
-def possession_availability(item: dict) -> dict[str, object]:
+def possession_availability(store: Store, item: dict, scope: str) -> dict[str, object]:
     """Say whether a recorded unit is currently in the owner's available custody."""
     state = item["ownership_state"]
-    available = state == "confirmed"
-    reason = (
-        "recorded as currently possessed and not lent"
-        if available
-        else f"item is not operationally available in ownership state {state}"
-    )
+    active = [
+        row
+        for row in store.rows["item_party_relations"]
+        if row["item_id"] == item["item_id"]
+        and row["role"] == "custodian"
+        and row["status"] == "active"
+    ]
+    hidden = [row for row in active if not scope_allows(scope, row["sensitivity"])]
+    visible = [row for row in active if scope_allows(scope, row["sensitivity"])]
+    possession = [row for row in visible if row.get("custody_kind") == "possession"]
+    external = [
+        row
+        for row in visible
+        if row.get("custody_kind") in {"loan", "storage", "service", "transit"}
+    ]
+    unknown = [row for row in visible if row.get("custody_kind") == "unknown"]
+    available_quantity: float | None = None
+    if hidden or unknown:
+        available: bool | None = None
+        reason = "current custody is hidden or unresolved at this scope"
+    elif state == "not_owned" and possession:
+        available = True
+        reason = "not owned, but explicit current custody is recorded"
+    elif state != "confirmed":
+        available = False
+        reason = f"item is not operationally available in ownership state {state}"
+    elif any(row.get("quantity") is None for row in external):
+        available = False
+        reason = "the item is in active external custody"
+    elif external:
+        allocated = sum(float(row["quantity"]) for row in external)
+        if item.get("quantity") is None:
+            available = None
+            reason = "external custody is quantified but the item quantity is unknown"
+        else:
+            available_quantity = max(0.0, float(item["quantity"]) - allocated)
+            available = available_quantity > 0
+            reason = (
+                "some recorded quantity remains in current custody"
+                if available
+                else "the full recorded quantity is in active external custody"
+            )
+    else:
+        available = state == "confirmed"
+        available_quantity = float(item["quantity"]) if item.get("quantity") is not None else None
+        reason = "recorded as owned with no active external custody"
     return {
         "available": available,
+        "available_quantity": available_quantity,
         "ownership_state": state,
         "reason": reason,
     }
@@ -6248,7 +6407,7 @@ def operational_availability(
 ) -> dict[str, object]:
     """Conservatively combine present custody with explicit usable condition."""
     scoped_item = {**item, **scope_visible_item_details(store, item, scope)}
-    possession = possession_availability(scoped_item)
+    possession = possession_availability(store, scoped_item, scope)
     normalized_condition = normalized(scoped_item.get("condition") or "")
     usable_conditions = {
         "excellent",
@@ -6276,8 +6435,11 @@ def operational_availability(
         condition_state = "unusable"
     else:
         condition_state = "unknown"
-    if possession["available"] is not True:
-        available: bool | None = False
+    if possession["available"] is None:
+        available: bool | None = None
+        reason = str(possession["reason"])
+    elif possession["available"] is False:
+        available = False
         reason = str(possession["reason"])
     elif condition_state == "usable":
         available = True
@@ -7708,7 +7870,8 @@ def _capture_decision_item(
     store.rows["items"].append(
         {
             "acquired_on": None, "condition": physical["condition"],
-            "container_id": physical["container_id"], "identity_sensitivity": sensitivity,
+            "container_id": physical["container_id"], "home_container_id": None,
+            "home_location_id": None, "identity_sensitivity": sensitivity,
             "item_id": item_id, "location_id": physical["location_id"], "model_id": model["model_id"],
             "notes": None, "ownership_state": "confirmed", "primary_evidence_id": evidence_id,
             "purchase_currency": None, "purchase_price": None, "quantity": physical["quantity"],
@@ -8805,6 +8968,15 @@ PROPOSAL_COMMANDS = {
     "physical-check",
     "restore-current-ownership",
     "return-loan",
+    "add-party",
+    "set-home",
+    "custody-start",
+    "custody-end",
+    "access-grant",
+    "access-revoke",
+    "ownership-start",
+    "ownership-end",
+    "embody-location",
     "move",
     "change",
     "add-interface",
@@ -9139,8 +9311,8 @@ def stable_location_and_container(
     if container_id is None:
         return
     container = store.get("locations", container_id)
-    if container["kind"] not in {"container", "vehicle", "asset"}:
-        raise InventoryError("physical discovery container must be a container, vehicle, or asset")
+    if container["kind"] not in CONTAINER_LOCATION_KINDS:
+        raise InventoryError("physical discovery container has a non-container location kind")
     seen: set[str] = set()
     current: dict | None = container
     while current is not None:
@@ -10264,7 +10436,7 @@ def command_fit(args: argparse.Namespace) -> dict:
         )
         if visible_item is None:
             return {"status": "unknown", "reason": "item_not_visible_or_not_recorded"}
-        availability = possession_availability(visible_item)
+        availability = possession_availability(store, visible_item, args.scope)
         if not availability["available"]:
             return {
                 "status": "unknown",
@@ -10323,7 +10495,7 @@ def command_pack(args: argparse.Namespace) -> dict:
             if visible_item is None:
                 unknown_item_ids.append(item_id)
                 continue
-            availability = possession_availability(visible_item)
+            availability = possession_availability(store, visible_item, args.scope)
             if not availability["available"]:
                 unavailable_items.append(
                     {"item_id": item_id, "availability": availability}
@@ -10472,6 +10644,9 @@ def command_search(args: argparse.Namespace) -> dict:
                 "ownership": match["item"]["ownership_state"],
                 "condition": match["item"]["condition"],
                 "location": match["location"],
+                "location_path": " / ".join(
+                    step["name"] for step in match["location_path"]
+                ),
                 "last_physical_check_on": match["item"]["verified_on"],
                 "evidence_types": sorted(
                     {evidence["evidence_type"] for evidence in match["evidence"]}
@@ -10519,11 +10694,6 @@ def command_locations(args: argparse.Namespace) -> dict:
             "parent_location_id"
         ) != args.parent_location_id:
             continue
-        searchable = " ".join(
-            (row["location_id"], row["name"], row["kind"])
-        ).casefold()
-        if query_tokens and not all(token in searchable for token in query_tokens):
-            continue
         chain = []
         current: dict | None = row
         visited: set[str] = set()
@@ -10537,12 +10707,29 @@ def command_locations(args: argparse.Namespace) -> dict:
                 }
             )
             current = locations.get(current.get("parent_location_id"))
+        path = list(reversed(chain))
+        path_text = " / ".join(step["name"] for step in path)
+        # Matching reads the whole root-to-leaf path, so "riverside third drawer"
+        # finds the drawer without the caller knowing the intermediate names.
+        searchable = " ".join(
+            (
+                row["location_id"],
+                row["name"],
+                row["kind"],
+                *(step["location_id"] for step in path),
+                *(step["name"] for step in path),
+            )
+        ).casefold()
+        if query_tokens and not all(token in searchable for token in query_tokens):
+            continue
         record = {
             "chain": chain,
             "kind": row["kind"],
             "location_id": row["location_id"],
             "name": row["name"],
             "parent_location_id": row.get("parent_location_id"),
+            "path": path,
+            "path_text": path_text,
         }
         if args.scope == "private":
             record["notes"] = row.get("notes")
@@ -12084,6 +12271,8 @@ def fact_item_ids(store: Store, table: str, row: dict) -> set[str]:
             for item in store.rows["items"]
             if item["model_id"] == row["model_id"]
         }
+    if table in {"item_party_relations", "location_embodiments"}:
+        return {row["item_id"]}
     return set()
 
 
@@ -12244,7 +12433,7 @@ def command_enrich_item(args: argparse.Namespace) -> dict:
     """Add receipt/acquisition metadata without claiming current possession."""
     changes = {
         field: getattr(args, field)
-        for field in ITEM_DETAIL_FIELDS
+        for field in ENRICH_ITEM_DETAIL_FIELDS
         if getattr(args, field) is not None
     }
     clear_fields = set(args.clear_field or [])
@@ -12423,6 +12612,8 @@ def command_order(args: argparse.Namespace) -> dict:
                     "acquired_on": None,
                     "condition": None,
                     "container_id": None,
+                    "home_container_id": None,
+                    "home_location_id": None,
                     "item_id": item_id,
                     "location_id": args.location_id or "loc-unknown",
                     "model_id": model["model_id"],
@@ -12617,6 +12808,8 @@ def command_plan(args: argparse.Namespace) -> dict:
                     "acquired_on": None,
                     "condition": None,
                     "container_id": None,
+                    "home_container_id": None,
+                    "home_location_id": None,
                     "item_id": item_id,
                     "location_id": args.location_id or "loc-unknown",
                     "model_id": model["model_id"],
@@ -12791,9 +12984,13 @@ def command_receive(args: argparse.Namespace) -> dict:
 
 
 def command_discover(args: argparse.Namespace) -> dict:
-    """Record one physically shown, already-owned unit in one evidence-safe transaction."""
+    """Record one physically shown unit without inventing its ownership."""
     if args.existing_item_id and args.new_model:
         raise InventoryError("--new-model cannot be used with --existing-item-id")
+    if args.existing_item_id and args.ownership_state != "confirmed":
+        raise InventoryError(
+            "non-confirmed ownership is only valid for a newly distinguished unit"
+        )
 
     def mutate(store: Store) -> dict:
         stable_location_and_container(store, args.location_id, args.container_id)
@@ -12934,11 +13131,13 @@ def command_discover(args: argparse.Namespace) -> dict:
                 "acquired_on": None,
                 "condition": args.condition,
                 "container_id": args.container_id,
+                "home_container_id": None,
+                "home_location_id": None,
                 "item_id": item_id,
                 "location_id": args.location_id,
                 "model_id": model["model_id"],
                 "notes": args.notes,
-                "ownership_state": "confirmed",
+                "ownership_state": args.ownership_state,
                 "primary_evidence_id": evidence_id,
                 "purchase_currency": None,
                 "purchase_price": None,
@@ -12956,16 +13155,22 @@ def command_discover(args: argparse.Namespace) -> dict:
         store.rows["item_evidence"].append(
             {"evidence_id": evidence_id, "item_id": item_id, "role": "primary"}
         )
-        received_event_id = add_event(
+        possession_event_id = add_event(
             store,
             item_id=item_id,
-            event_type="received",
+            event_type=("received" if args.ownership_state == "confirmed" else "ingested"),
             occurred_on=args.checked_on,
             actor=args.actor,
             evidence_id=evidence_id,
-            notes="Current possession established by physical discovery. " + (args.notes or ""),
-            location_id=args.location_id,
-            container_id=args.container_id,
+            notes=(
+                "Current ownership and possession established by physical discovery. "
+                if args.ownership_state == "confirmed"
+                else "Physical presence established; ownership remains "
+                f"{args.ownership_state}. "
+            )
+            + (args.notes or ""),
+            location_id=(args.location_id if args.ownership_state == "confirmed" else None),
+            container_id=(args.container_id if args.ownership_state == "confirmed" else None),
         )
         physical_event_id = add_event(
             store,
@@ -12984,7 +13189,12 @@ def command_discover(args: argparse.Namespace) -> dict:
             "model_created": model_created,
             "item_reused": False,
             "evidence_id": evidence_id,
-            "received_event_id": received_event_id,
+            "received_event_id": (
+                possession_event_id if args.ownership_state == "confirmed" else None
+            ),
+            "ingested_event_id": (
+                possession_event_id if args.ownership_state != "confirmed" else None
+            ),
             "physical_event_id": physical_event_id,
         }
 
@@ -13216,7 +13426,7 @@ def command_not_found(args: argparse.Namespace) -> dict:
 def command_physical_check(args: argparse.Namespace) -> dict:
     def mutate(store: Store) -> dict:
         item = store.get("items", args.item_id)
-        if item["ownership_state"] in {"disposed", "refunded", "not_owned"}:
+        if item["ownership_state"] in {"disposed", "refunded"}:
             raise InventoryError(
                 f"physical confirmation would contradict state {item['ownership_state']}; correct or reacquire explicitly"
             )
@@ -13247,7 +13457,7 @@ def command_physical_check(args: argparse.Namespace) -> dict:
         )
         received_event_id = None
         previous_state = item["ownership_state"]
-        if previous_state not in {"confirmed", "lent"}:
+        if previous_state in {"candidate", "planned"}:
             item["ownership_state"] = "confirmed"
             received_event_id = add_event(
                 store,
@@ -13323,10 +13533,11 @@ def command_return_loan(args: argparse.Namespace) -> dict:
 
     def mutate(store: Store) -> dict:
         item = store.get("items", args.item_id)
-        if item["ownership_state"] != "lent":
-            raise InventoryError("return-loan requires an item currently marked lent")
+        active_loans = [row for row in store.rows["item_party_relations"] if row["item_id"] == args.item_id
+                        and row["role"] == "custodian" and row.get("custody_kind") == "loan" and row["status"] == "active"]
+        if len(active_loans) != 1:
+            raise InventoryError("return-loan requires exactly one active loan custody relation")
         stable_location_and_container(store, args.location_id, args.container_id)
-        item["ownership_state"] = "confirmed"
         item["location_id"] = args.location_id
         item["container_id"] = args.container_id
         evidence_id = add_evidence(
@@ -13355,6 +13566,14 @@ def command_return_loan(args: argparse.Namespace) -> dict:
             notes=args.notes,
             location_id=args.location_id,
             container_id=args.container_id,
+            details={"relation_id": active_loans[0]["relation_id"]},
+        )
+        active_loans[0].update(
+            {
+                "status": "ended",
+                "ended_on": args.returned_on,
+                "ended_evidence_id": evidence_id,
+            }
         )
         return {
             "evidence_id": evidence_id,
@@ -13527,7 +13746,16 @@ def command_restore_current_ownership(args: argparse.Namespace) -> dict:
 def command_move(args: argparse.Namespace) -> dict:
     def mutate(store: Store) -> dict:
         item = store.get("items", args.item_id)
-        if item["ownership_state"] not in {"confirmed", "lent"}:
+        borrowed_in_possession = any(
+            row["item_id"] == args.item_id
+            and row["role"] == "custodian"
+            and row["status"] == "active"
+            and row.get("custody_kind") == "possession"
+            for row in store.rows["item_party_relations"]
+        )
+        if item["ownership_state"] != "confirmed" and not (
+            item["ownership_state"] == "not_owned" and borrowed_in_possession
+        ):
             raise InventoryError(f"cannot move item in state {item['ownership_state']}")
         stable_location_and_container(store, args.location_id, args.container_id)
         item["location_id"] = args.location_id
@@ -13556,7 +13784,52 @@ def command_move(args: argparse.Namespace) -> dict:
             location_id=args.location_id,
             container_id=args.container_id,
         )
-        return {"item_id": args.item_id, "evidence_id": evidence_id, "event_id": event_id}
+        embodiment = next(
+            (row for row in store.rows["location_embodiments"] if row["item_id"] == args.item_id),
+            None,
+        )
+        if embodiment is not None:
+            location = store.get("locations", embodiment["location_id"])
+            previous = dict(location)
+            location["parent_location_id"] = args.container_id or args.location_id
+            replacement = dict(location)
+            recorded_at = recorded_timestamp(None)
+            amendment_id = store.allocate(
+                "fact_amendments", f"fact-amend-embodiment-move-{args.item_id}-{args.moved_on}"
+            )
+            store.rows["fact_amendments"].append(
+                {
+                    "action": "replace",
+                    "actor": args.actor,
+                    "amended_on": args.moved_on,
+                    "evidence_id": evidence_id,
+                    "fact_amendment_id": amendment_id,
+                    "notes": args.notes,
+                    "previous_json": strict_json_dumps(previous, sort_keys=True),
+                    "reason": "embodied location follows its item move",
+                    "recorded_at": recorded_at,
+                    "replacement_json": strict_json_dumps(replacement, sort_keys=True),
+                    "selector_json": strict_json_dumps(
+                        {"location_id": location["location_id"]}, sort_keys=True
+                    ),
+                    "sensitivity": max(
+                        (
+                            item["sensitivity"],
+                            store.get("evidence", evidence_id)["sensitivity"],
+                            location["sensitivity"],
+                        ),
+                        key=SENSITIVITY_RANK.__getitem__,
+                    ),
+                    "table_name": "locations",
+                }
+            )
+        return {
+            "item_id": args.item_id,
+            "evidence_id": evidence_id,
+            "event_id": event_id,
+            "embodied_location_reparented": embodiment is not None,
+            "location_amendment_id": amendment_id if embodiment is not None else None,
+        }
 
     return transaction(
         args.inventory_root,
@@ -13567,6 +13840,278 @@ def command_move(args: argparse.Namespace) -> dict:
     )
 
 
+def _add_party_evidence(store: Store, *, name: str, source_ref: str, captured_on: str,
+                        sensitivity: str, notes: str | None) -> str:
+    identity = strict_json_dumps({"captured_on": captured_on, "name": name,
+                                  "source_ref": source_ref}, sort_keys=True)
+    evidence_id = "ev-party-" + hashlib.sha256(identity.encode()).hexdigest()[:24]
+    existing = [row for row in store.rows["evidence"] if row["evidence_id"] == evidence_id]
+    if not existing:
+        store.rows["evidence"].append({"evidence_id": evidence_id, "evidence_type": "user_source",
+            "source_ref": source_ref, "captured_on": captured_on, "claim_strength": "explicit_current",
+            "sensitivity": sensitivity, "notes": notes})
+    return evidence_id
+
+
+def command_add_party(args: argparse.Namespace) -> dict:
+    def mutate(store: Store) -> dict:
+        matches = [
+            row
+            for row in store.rows["parties"]
+            if normalized(row["name"]) == normalized(args.name)
+            and row["party_kind"] == args.party_kind
+        ]
+        if len(matches) > 1:
+            raise InventoryError("party match is ambiguous; correct the existing records first")
+        if matches:
+            return {
+                "party_id": matches[0]["party_id"],
+                "evidence_id": matches[0]["evidence_id"],
+                "reused": True,
+            }
+        evidence_id = _add_party_evidence(store, name=args.name, source_ref=args.source_ref,
+            captured_on=args.captured_on, sensitivity=args.sensitivity, notes=args.notes)
+        party_id = "party-" + hashlib.sha256(
+            strict_json_dumps({"name": args.name, "kind": args.party_kind, "evidence": evidence_id}, sort_keys=True).encode()
+        ).hexdigest()[:24]
+        row = {"party_id": party_id, "name": args.name, "party_kind": args.party_kind,
+               "evidence_id": evidence_id, "sensitivity": args.sensitivity, "notes": args.notes}
+        store.rows["parties"].append(row)
+        return {"party_id": party_id, "evidence_id": evidence_id, "reused": False}
+    return transaction(args.inventory_root, args.runtime_dir, f"add-party-{slug(args.name, 32)}", mutate,
+                       continue_batch=args.continue_batch)
+
+
+def _relation_evidence(store: Store, args: argparse.Namespace, *, item_id: str, date_value: str) -> str:
+    return add_evidence(store, item_id=item_id, base=f"custody-{slug(item_id, 28)}-{date_value}",
+        evidence_type="user_source", source_ref=args.source_ref, captured_on=date_value,
+        claim_strength="explicit_current", notes=args.notes,
+        minimum_sensitivity=location_context_sensitivity(store, store.get("items", item_id).get("location_id"), store.get("items", item_id).get("container_id")))
+
+
+def command_custody_start(args: argparse.Namespace) -> dict:
+    def mutate(store: Store) -> dict:
+        item = store.get("items", args.item_id)
+        if item["ownership_state"] not in {"confirmed", "unknown", "not_owned"}:
+            raise InventoryError("custody requires a current item, not a planned or terminal record")
+        party = None
+        if args.party_id is not None:
+            party = store.get("parties", args.party_id)
+        if (args.quantity is None) != (args.unit is None):
+            raise InventoryError("custody quantity and unit must be supplied together")
+        if args.quantity is not None and args.unit != item["unit"]:
+            raise InventoryError("custody unit must match the item unit")
+        active = [
+            row
+            for row in store.rows["item_party_relations"]
+            if row["item_id"] == args.item_id
+            and row["role"] == "custodian"
+            and row["status"] == "active"
+        ]
+        if args.quantity is None and active:
+            raise InventoryError("unknown custody quantity cannot overlap another active allocation")
+        if args.quantity is not None and any(row.get("quantity") is None for row in active):
+            raise InventoryError("known custody quantity cannot overlap an unknown allocation")
+        if args.quantity is not None:
+            allocated = sum(float(row["quantity"]) for row in active)
+            if item.get("quantity") is not None and allocated + args.quantity > float(item["quantity"]):
+                raise InventoryError("active custody allocation would exceed item quantity")
+        previous_placement = (item.get("location_id"), item.get("container_id"))
+        if args.location_id is not None:
+            stable_location_and_container(store, args.location_id, args.container_id)
+            item["location_id"] = args.location_id
+            item["container_id"] = args.container_id
+        elif args.container_id is not None:
+            raise InventoryError("custody container requires a custody location")
+        evidence_id = _relation_evidence(store, args, item_id=args.item_id, date_value=args.started_on)
+        relation_id = store.allocate("item_party_relations", f"rel-custody-{slug(args.item_id, 28)}-{args.started_on}")
+        store.rows["item_party_relations"].append({"relation_id": relation_id, "item_id": args.item_id,
+            "party_id": args.party_id, "role": "custodian", "custody_kind": args.custody_kind,
+            "status": "active", "started_on": args.started_on, "ended_on": None,
+            "ended_evidence_id": None, "due_on": args.due_on,
+            "quantity": args.quantity, "unit": args.unit, "evidence_id": evidence_id,
+            "sensitivity": max((item["sensitivity"], store.get("evidence", evidence_id)["sensitivity"],
+                party["sensitivity"] if party is not None else "low"), key=SENSITIVITY_RANK.__getitem__),
+            "notes": args.notes})
+        event_ids = []
+        if args.location_id is not None and previous_placement != (args.location_id, args.container_id):
+            event_ids.append(add_event(store, item_id=args.item_id, event_type="moved",
+                occurred_on=args.started_on, actor=args.actor, evidence_id=evidence_id, notes=args.notes,
+                location_id=item.get("location_id"), container_id=item.get("container_id")))
+        event_ids.append(add_event(store, item_id=args.item_id,
+            event_type="lent" if args.custody_kind == "loan" else "custody_started",
+            occurred_on=args.started_on, actor=args.actor, evidence_id=evidence_id, notes=args.notes,
+            location_id=(item.get("location_id") if args.custody_kind == "loan" else None),
+            container_id=(item.get("container_id") if args.custody_kind == "loan" else None),
+            details={"relation_id": relation_id}))
+        return {"relation_id": relation_id, "evidence_id": evidence_id,
+                "event_id": event_ids[-1], "event_ids": event_ids}
+    return transaction(args.inventory_root, args.runtime_dir, f"custody-start-{args.item_id}", mutate,
+                       continue_batch=args.continue_batch)
+
+
+def command_custody_end(args: argparse.Namespace) -> dict:
+    def mutate(store: Store) -> dict:
+        relation = store.get("item_party_relations", args.relation_id)
+        if relation["role"] != "custodian" or relation["status"] != "active":
+            raise InventoryError("custody-end requires one active custody relation")
+        evidence_id = _relation_evidence(store, args, item_id=relation["item_id"], date_value=args.ended_on)
+        relation.update({"status": "ended", "ended_on": args.ended_on,
+                         "ended_evidence_id": evidence_id})
+        item = store.get("items", relation["item_id"])
+        if args.location_id is not None:
+            stable_location_and_container(store, args.location_id, args.container_id)
+            item["location_id"] = args.location_id
+            item["container_id"] = args.container_id
+        elif args.container_id is not None:
+            raise InventoryError("custody container requires a custody location")
+        event_ids = []
+        if args.location_id is not None:
+            event_ids.append(add_event(store, item_id=relation["item_id"], event_type="moved",
+                occurred_on=args.ended_on, actor=args.actor, evidence_id=evidence_id,
+                notes=args.notes, location_id=args.location_id, container_id=args.container_id))
+        event_ids.append(add_event(store, item_id=relation["item_id"],
+            event_type="loan_returned" if relation["custody_kind"] == "loan" else "custody_ended",
+            occurred_on=args.ended_on, actor=args.actor, evidence_id=evidence_id, notes=args.notes,
+            location_id=(item.get("location_id") if relation["custody_kind"] == "loan" else None),
+            container_id=(item.get("container_id") if relation["custody_kind"] == "loan" else None),
+            details={"relation_id": relation["relation_id"]}))
+        return {"relation_id": relation["relation_id"], "evidence_id": evidence_id,
+                "event_id": event_ids[-1], "event_ids": event_ids}
+    return transaction(args.inventory_root, args.runtime_dir, f"custody-end-{args.relation_id}", mutate,
+                       continue_batch=args.continue_batch)
+
+
+def command_set_home(args: argparse.Namespace) -> dict:
+    def mutate(store: Store) -> dict:
+        item = store.get("items", args.item_id)
+        if args.clear:
+            if args.container_id is not None:
+                raise InventoryError("clearing home cannot name a container")
+            location_id = None
+            container_id = None
+        else:
+            location_id = args.location_id
+            container_id = args.container_id
+            stable_location_and_container(store, location_id, container_id)
+        evidence_id = add_evidence(store, item_id=args.item_id, base=f"home-{slug(args.item_id, 28)}-{args.set_on}",
+            evidence_type="user_source", source_ref=args.source_ref, captured_on=args.set_on,
+            claim_strength="explicit_current", notes=args.notes,
+            minimum_sensitivity=location_context_sensitivity(store, location_id, container_id))
+        amendment_id = append_item_detail_amendment(store, item=item, changes={"home_location_id": location_id,
+            "home_container_id": container_id}, amended_on=args.set_on, actor=args.actor,
+            evidence_id=evidence_id, notes=args.notes)
+        if amendment_id is None:
+            raise InventoryError("home is already recorded with this exact placement")
+        return {"item_id": args.item_id, "evidence_id": evidence_id, "detail_amendment_id": amendment_id}
+    return transaction(args.inventory_root, args.runtime_dir, f"set-home-{args.item_id}", mutate,
+                       continue_batch=args.continue_batch)
+
+
+def _named_relation_change(
+    args: argparse.Namespace, *, role: str, ending: bool
+) -> dict:
+    start_event = "access_granted" if role == "access" else "ownership_started"
+    end_event = "access_revoked" if role == "access" else "ownership_ended"
+    start_date_argument = "granted_on" if role == "access" else "started_on"
+    end_date_argument = "revoked_on" if role == "access" else "ended_on"
+
+    def mutate(store: Store) -> dict:
+        if ending:
+            relation = store.get("item_party_relations", args.relation_id)
+            if relation["role"] != role or relation["status"] != "active":
+                raise InventoryError(
+                    f"{role} end requires one active {role} relation"
+                )
+            item_id = relation["item_id"]
+            party_id = relation["party_id"]
+            event_date = getattr(args, end_date_argument)
+        else:
+            party = store.get("parties", args.party_id)
+            store.get("items", args.item_id)
+            item_id = args.item_id
+            party_id = args.party_id
+            event_date = getattr(args, start_date_argument)
+            if any(
+                row["item_id"] == item_id
+                and row["party_id"] == party_id
+                and row["role"] == role
+                and row["status"] == "active"
+                for row in store.rows["item_party_relations"]
+            ):
+                raise InventoryError(
+                    f"item already has this party as an active {role}"
+                )
+        evidence_id = _relation_evidence(store, args, item_id=item_id, date_value=event_date)
+        if ending:
+            relation.update({"status": "ended", "ended_on": event_date,
+                             "ended_evidence_id": evidence_id})
+            event_id = add_event(store, item_id=item_id, event_type=end_event,
+                occurred_on=event_date, actor=args.actor, evidence_id=evidence_id,
+                notes=args.notes, details={"relation_id": relation["relation_id"]})
+            return {"relation_id": relation["relation_id"], "evidence_id": evidence_id,
+                    "event_id": event_id}
+        relation_id = store.allocate(
+            "item_party_relations",
+            f"rel-{role}-{slug(item_id, 28)}-{slug(party_id, 20)}-{event_date}",
+        )
+        store.rows["item_party_relations"].append({"relation_id": relation_id, "item_id": item_id, "party_id": party_id,
+            "role": role, "custody_kind": None, "status": "active", "started_on": event_date, "ended_on": None,
+            "ended_evidence_id": None, "due_on": None, "quantity": None, "unit": None,
+            "evidence_id": evidence_id,
+            "sensitivity": max((store.get("items", item_id)["sensitivity"],
+                store.get("evidence", evidence_id)["sensitivity"], party["sensitivity"]),
+                key=SENSITIVITY_RANK.__getitem__), "notes": args.notes})
+        event_id = add_event(store, item_id=item_id, event_type=start_event,
+            occurred_on=event_date, actor=args.actor, evidence_id=evidence_id, notes=args.notes,
+            details={"relation_id": relation_id})
+        return {"relation_id": relation_id, "evidence_id": evidence_id, "event_id": event_id}
+    action = f"{role}-end" if ending else f"{role}-start"
+    return transaction(
+        args.inventory_root,
+        args.runtime_dir,
+        action,
+        mutate,
+        continue_batch=args.continue_batch,
+    )
+
+
+def command_access_grant(args: argparse.Namespace) -> dict:
+    return _named_relation_change(args, role="access", ending=False)
+
+
+def command_access_revoke(args: argparse.Namespace) -> dict:
+    return _named_relation_change(args, role="access", ending=True)
+
+
+def command_ownership_start(args: argparse.Namespace) -> dict:
+    return _named_relation_change(args, role="owner", ending=False)
+
+
+def command_ownership_end(args: argparse.Namespace) -> dict:
+    return _named_relation_change(args, role="owner", ending=True)
+
+
+def command_embody_location(args: argparse.Namespace) -> dict:
+    def mutate(store: Store) -> dict:
+        item = store.get("items", args.item_id)
+        location = store.get("locations", args.location_id)
+        placement = item.get("container_id") or item.get("location_id")
+        if item["ownership_state"] != "confirmed" or placement != location.get("parent_location_id"):
+            raise InventoryError("embodied location must be owned/current and parented at the item's current placement")
+        evidence_id = add_evidence(store, item_id=args.item_id, base=f"embody-{slug(args.item_id, 28)}-{args.recorded_on}",
+            evidence_type="user_source", source_ref=args.source_ref, captured_on=args.recorded_on,
+            claim_strength="explicit_current", notes=args.notes,
+            minimum_sensitivity=location_context_sensitivity(store, placement))
+        embodiment_id = store.allocate("location_embodiments", f"emb-{slug(args.item_id, 28)}")
+        store.rows["location_embodiments"].append({"embodiment_id": embodiment_id, "item_id": args.item_id,
+            "location_id": args.location_id, "evidence_id": evidence_id,
+            "sensitivity": max((item["sensitivity"], location["sensitivity"]), key=SENSITIVITY_RANK.__getitem__), "notes": args.notes})
+        return {"embodiment_id": embodiment_id, "evidence_id": evidence_id}
+    return transaction(args.inventory_root, args.runtime_dir, f"embody-location-{args.item_id}", mutate,
+                       continue_batch=args.continue_batch)
+
+
 def command_change(args: argparse.Namespace) -> dict:
     state_by_event = {
         "returned": "refunded",
@@ -13575,7 +14120,6 @@ def command_change(args: argparse.Namespace) -> dict:
         "gifted": "disposed",
         "disposed": "disposed",
         "lost": "disposed",
-        "lent": "lent",
         "ownership_unresolved": "unknown",
         "ownership_excluded": "not_owned",
     }
@@ -13592,16 +14136,16 @@ def command_change(args: argparse.Namespace) -> dict:
         "quantity_changed": "explicit_current",
     }
     allowed_states_by_event = {
-        "returned": {"confirmed", "lent"},
+        "returned": {"confirmed"},
         "cancelled": {"candidate", "planned"},
         "refunded": {"candidate", "planned", "confirmed"},
-        "gifted": {"confirmed", "lent"},
-        "disposed": {"confirmed", "lent"},
-        "lost": {"confirmed", "lent"},
+        "gifted": {"confirmed"},
+        "disposed": {"confirmed"},
+        "lost": {"confirmed"},
         "lent": {"confirmed"},
-        "ownership_unresolved": {"candidate", "planned", "confirmed", "lent", "unknown"},
+        "ownership_unresolved": {"candidate", "planned", "confirmed", "unknown"},
         "ownership_excluded": {"candidate", "planned", "unknown"},
-        "quantity_changed": {"confirmed", "lent"},
+        "quantity_changed": {"confirmed"},
     }
 
     occurred_on, observed_on, date_precision = resolved_event_date(
@@ -13627,8 +14171,9 @@ def command_change(args: argparse.Namespace) -> dict:
         if args.event_type == "quantity_changed":
             if args.quantity is None:
                 raise InventoryError("quantity_changed requires --quantity")
-        else:
+        elif args.event_type != "lent":
             item["ownership_state"] = state_by_event[args.event_type]
+        loan_relation_id = None
         if args.event_type == "lent":
             if args.location_id is None:
                 item["location_id"] = "loc-unknown"
@@ -13662,6 +14207,29 @@ def command_change(args: argparse.Namespace) -> dict:
                 item.get("container_id"),
             ),
         )
+        if args.event_type == "lent":
+            if any(row["item_id"] == args.item_id and row["role"] == "custodian" and row["status"] == "active"
+                   for row in store.rows["item_party_relations"]):
+                raise InventoryError("item already has active custody; use custody-end or return-loan first")
+            loan_relation_id = store.allocate(
+                "item_party_relations",
+                f"rel-custody-{slug(args.item_id, 28)}-{occurred_on or observed_on}",
+            )
+            store.rows["item_party_relations"].append({
+                "relation_id": loan_relation_id,
+                "item_id": args.item_id, "party_id": None, "role": "custodian", "custody_kind": "loan",
+                "status": "active", "started_on": occurred_on, "ended_on": None,
+                "ended_evidence_id": None, "due_on": None,
+                "quantity": None, "unit": None, "evidence_id": evidence_id,
+                "sensitivity": max(
+                    (
+                        item["sensitivity"],
+                        store.get("evidence", evidence_id)["sensitivity"],
+                    ),
+                    key=SENSITIVITY_RANK.__getitem__,
+                ),
+                "notes": args.notes,
+            })
         terminal = item["ownership_state"] in {"disposed", "refunded", "not_owned"}
         if args.event_type == "quantity_changed":
             event_id = apply_quantity_change(
@@ -13691,6 +14259,11 @@ def command_change(args: argparse.Namespace) -> dict:
                 notes=args.notes,
                 location_id=(previous_location if terminal else item.get("location_id")),
                 container_id=(previous_container if terminal else item.get("container_id")),
+                details=(
+                    {"relation_id": loan_relation_id}
+                    if loan_relation_id is not None
+                    else None
+                ),
             )
         return {
             "item_id": args.item_id,
@@ -14006,12 +14579,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     locations_read_parser = subparsers.add_parser(
         "locations",
-        help="List or resolve scope-visible rooms, containers, vehicles, assets, and places",
+        help=(
+            "List or resolve scope-visible spatial nodes with their full root-to-leaf path; "
+            "the query matches the whole path, not only the leaf name"
+        ),
     )
     locations_read_parser.add_argument("--query")
     locations_read_parser.add_argument("--parent-location-id")
     locations_read_parser.add_argument(
-        "--kind", choices=("place", "room", "container", "vehicle", "asset", "unknown")
+        "--kind", choices=LOCATION_KIND_CHOICES
     )
     locations_read_parser.add_argument("--limit", type=int, default=500)
     locations_read_parser.add_argument("--cursor")
@@ -14450,14 +15026,15 @@ def build_parser() -> argparse.ArgumentParser:
     proposal_apply_parser.set_defaults(function=command_proposal_apply)
 
     location_parser = subparsers.add_parser(
-        "add-location", help="Add or reuse a place, room, container, vehicle, or asset"
+        "add-location",
+        help="Add or reuse one node of the spatial tree, from a site down to a compartment",
     )
     location_parser.add_argument("--name", required=True)
     location_parser.add_argument("--location-id")
     location_parser.add_argument("--parent-location-id")
     location_parser.add_argument(
         "--kind",
-        choices=("place", "room", "container", "vehicle", "asset", "unknown"),
+        choices=LOCATION_KIND_CHOICES,
         required=True,
     )
     location_parser.add_argument(
@@ -14565,7 +15142,7 @@ def build_parser() -> argparse.ArgumentParser:
     enrich_item_parser.add_argument("--receipt-ref")
     enrich_item_parser.add_argument("--serial-or-lot")
     enrich_item_parser.add_argument(
-        "--clear-field", action="append", choices=ITEM_DETAIL_FIELDS, default=[]
+        "--clear-field", action="append", choices=ENRICH_ITEM_DETAIL_FIELDS, default=[]
     )
     enrich_item_parser.add_argument("--notes")
     enrich_item_parser.set_defaults(function=command_enrich_item)
@@ -14682,6 +15259,15 @@ def build_parser() -> argparse.ArgumentParser:
     discover_parser.add_argument("--unit", default="item")
     discover_parser.add_argument("--condition")
     discover_parser.add_argument("--serial-or-lot")
+    discover_parser.add_argument(
+        "--ownership-state",
+        choices=("confirmed", "unknown", "not_owned"),
+        default="confirmed",
+        help=(
+            "Ownership evidenced by the check. Use unknown or not_owned for a newly "
+            "distinguished borrowed or otherwise non-owned unit."
+        ),
+    )
     discover_parser.add_argument(
         "--sensitivity", choices=("low", "personal", "high"), default="personal"
     )
@@ -14804,6 +15390,93 @@ def build_parser() -> argparse.ArgumentParser:
     return_loan_parser.add_argument("--location-id", required=True)
     return_loan_parser.add_argument("--container-id")
     return_loan_parser.set_defaults(function=command_return_loan)
+
+    add_party_parser = subparsers.add_parser("add-party", help="Add an evidence-backed named counterparty")
+    add_source(add_party_parser)
+    add_party_parser.add_argument("--name", required=True)
+    add_party_parser.add_argument("--party-kind", choices=("person", "household", "organisation", "unknown"), required=True)
+    add_party_parser.add_argument("--captured-on", type=valid_date, required=True)
+    add_party_parser.add_argument("--sensitivity", choices=("low", "personal", "high"), default="personal")
+    add_party_parser.set_defaults(function=command_add_party)
+
+    set_home_parser = subparsers.add_parser("set-home", help="Amend an item's independent home placement")
+    add_actor(set_home_parser)
+    add_source(set_home_parser)
+    set_home_parser.add_argument("--item-id", required=True)
+    set_home_parser.add_argument("--set-on", type=valid_date, required=True)
+    home_destination = set_home_parser.add_mutually_exclusive_group(required=True)
+    home_destination.add_argument("--location-id")
+    home_destination.add_argument(
+        "--clear",
+        action="store_true",
+        help="Record that the item's usual home is currently unknown",
+    )
+    set_home_parser.add_argument("--container-id")
+    set_home_parser.set_defaults(function=command_set_home)
+
+    custody_start_parser = subparsers.add_parser("custody-start", help="Start a supported custody episode without changing ownership")
+    add_actor(custody_start_parser)
+    add_source(custody_start_parser)
+    custody_start_parser.add_argument("--item-id", required=True)
+    custody_start_parser.add_argument("--party-id")
+    custody_start_parser.add_argument("--custody-kind", choices=("loan", "storage", "service", "transit", "possession", "unknown"), required=True)
+    custody_start_parser.add_argument("--started-on", type=valid_date, required=True)
+    custody_start_parser.add_argument("--due-on", type=valid_date)
+    custody_start_parser.add_argument("--location-id")
+    custody_start_parser.add_argument("--container-id")
+    custody_start_parser.add_argument("--quantity", type=positive_number)
+    custody_start_parser.add_argument("--unit")
+    custody_start_parser.set_defaults(function=command_custody_start)
+
+    custody_end_parser = subparsers.add_parser("custody-end", help="End a supported custody episode")
+    add_actor(custody_end_parser)
+    add_source(custody_end_parser)
+    custody_end_parser.add_argument("--relation-id", required=True)
+    custody_end_parser.add_argument("--ended-on", type=valid_date, required=True)
+    custody_end_parser.add_argument("--location-id")
+    custody_end_parser.add_argument("--container-id")
+    custody_end_parser.set_defaults(function=command_custody_end)
+
+    access_grant_parser = subparsers.add_parser("access-grant", help="Record independent item access")
+    add_actor(access_grant_parser)
+    add_source(access_grant_parser)
+    access_grant_parser.add_argument("--item-id", required=True)
+    access_grant_parser.add_argument("--party-id", required=True)
+    access_grant_parser.add_argument("--granted-on", type=valid_date, required=True)
+    access_grant_parser.set_defaults(function=command_access_grant)
+
+    access_revoke_parser = subparsers.add_parser("access-revoke", help="End independent item access")
+    add_actor(access_revoke_parser)
+    add_source(access_revoke_parser)
+    access_revoke_parser.add_argument("--relation-id", required=True)
+    access_revoke_parser.add_argument("--revoked-on", type=valid_date, required=True)
+    access_revoke_parser.set_defaults(function=command_access_revoke)
+
+    ownership_start_parser = subparsers.add_parser(
+        "ownership-start", help="Record an evidence-backed owner without changing custody"
+    )
+    add_actor(ownership_start_parser)
+    add_source(ownership_start_parser)
+    ownership_start_parser.add_argument("--item-id", required=True)
+    ownership_start_parser.add_argument("--party-id", required=True)
+    ownership_start_parser.add_argument("--started-on", type=valid_date, required=True)
+    ownership_start_parser.set_defaults(function=command_ownership_start)
+
+    ownership_end_parser = subparsers.add_parser(
+        "ownership-end", help="End one explicit ownership episode"
+    )
+    add_actor(ownership_end_parser)
+    add_source(ownership_end_parser)
+    ownership_end_parser.add_argument("--relation-id", required=True)
+    ownership_end_parser.add_argument("--ended-on", type=valid_date, required=True)
+    ownership_end_parser.set_defaults(function=command_ownership_end)
+
+    embody_parser = subparsers.add_parser("embody-location", help="Bind an owned current item to the location node it embodies")
+    add_source(embody_parser)
+    embody_parser.add_argument("--item-id", required=True)
+    embody_parser.add_argument("--location-id", required=True)
+    embody_parser.add_argument("--recorded-on", type=valid_date, required=True)
+    embody_parser.set_defaults(function=command_embody_location)
 
     move_parser = subparsers.add_parser(
         "move", help="Change the current stable location with explicit evidence"

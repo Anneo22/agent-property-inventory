@@ -16,6 +16,7 @@ from typing import Any, Literal
 from .capture_adapters import load_adapter_registry
 from .cli import execute
 from .config import ConfigError, resolve_instance_config
+from .rebuild import LOCATION_KINDS
 
 
 def create_server(
@@ -46,7 +47,7 @@ def create_server(
             "not absent. Compatibility is definitive only when supported by normalized "
             "or sufficiently confident explicit evidence."
         ),
-        version="0.1.0",
+        version="0.2.0",
     )
     frozen_capture_registry = (
         load_adapter_registry(capture_adapters_config)
@@ -257,8 +258,10 @@ def create_server(
     @server.tool(
         name="list_inventory_locations",
         description=(
-            "List or resolve scope-visible places, rooms, containers, vehicles, and assets "
-            "before choosing an area or parent location."
+            "List or resolve scope-visible nodes of the spatial tree, from a site down to a "
+            "compartment, with each match carrying its full root-to-leaf path. Search matches "
+            "the whole path, so an intermediate name need not be known. Use it before choosing "
+            "an area or parent location."
         ),
         structured_output=True,
     )
@@ -271,7 +274,7 @@ def create_server(
     ) -> dict[str, Any]:
         if limit < 1 or limit > 500:
             raise ValueError("limit must be between 1 and 500")
-        if kind not in {None, "place", "room", "container", "vehicle", "asset", "unknown"}:
+        if kind is not None and kind not in LOCATION_KINDS:
             raise ValueError("invalid location kind")
         arguments = ["locations", "--limit", str(limit)]
         if cursor is not None:

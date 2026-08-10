@@ -44,7 +44,7 @@ except ImportError:  # direct script execution by the CLI
     from spatial import SpatialValidationError, normalize_spatial_profile
     from valuation_policy import valuation_evidence_supports_basis
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 TABLES = (
     "metadata",
     "proposal_commits",
@@ -76,6 +76,9 @@ TABLES = (
     "item_amendments",
     "item_detail_amendments",
     "fact_amendments",
+    "parties",
+    "item_party_relations",
+    "location_embodiments",
     "inventory_events",
 )
 
@@ -85,7 +88,22 @@ class SchemaVersionError(ValueError):
 
 
 SENSITIVITY_RANK = {"low": 0, "personal": 1, "high": 2}
-CONTAINER_LOCATION_KINDS = frozenset({"container", "vehicle", "asset"})
+# One arbitrary-depth spatial tree carries every scale, from a site down to a
+# single drawer.  Legacy kinds keep their meaning so older stores stay readable.
+LEGACY_LOCATION_KINDS = frozenset({"place", "room", "container", "vehicle", "asset", "unknown"})
+LOCATION_KINDS = LEGACY_LOCATION_KINDS | frozenset(
+    {"site", "building", "floor", "zone", "furniture", "compartment"}
+)
+CONTAINER_LOCATION_KINDS = frozenset(
+    {"container", "vehicle", "asset", "furniture", "compartment"}
+)
+PARTY_KINDS = frozenset({"person", "household", "organisation", "unknown"})
+# A custodian may be genuinely unknown.  Ownership and access are claims about a
+# specific party, so they cannot be recorded without naming one.
+PARTY_RELATION_ROLES = frozenset({"owner", "custodian", "access"})
+NAMED_PARTY_RELATION_ROLES = frozenset({"owner", "access"})
+PARTY_RELATION_STATES = frozenset({"active", "ended"})
+CUSTODY_KINDS = frozenset({"loan", "storage", "service", "transit", "possession", "unknown"})
 CHRONOLOGICAL_EVENT_TYPES = frozenset(
     {
         "planned",
@@ -100,6 +118,12 @@ CHRONOLOGICAL_EVENT_TYPES = frozenset(
         "lost",
         "lent",
         "loan_returned",
+        "custody_started",
+        "custody_ended",
+        "access_granted",
+        "access_revoked",
+        "ownership_started",
+        "ownership_ended",
         "ownership_unresolved",
         "ownership_excluded",
         "quantity_changed",
@@ -120,6 +144,12 @@ EVENT_CLAIM_REQUIREMENTS = {
     "moved": "explicit_current",
     "lent": "explicit_current",
     "loan_returned": "explicit_current",
+    "custody_started": "explicit_current",
+    "custody_ended": "explicit_current",
+    "access_granted": "explicit_current",
+    "access_revoked": "explicit_current",
+    "ownership_started": "explicit_current",
+    "ownership_ended": "explicit_current",
     "quantity_changed": "explicit_current",
     "sold": "explicit_not_owned",
     "returned": "explicit_not_owned",
@@ -166,6 +196,8 @@ ITEM_DETAIL_FIELDS = (
     "purchase_price",
     "receipt_ref",
     "serial_or_lot",
+    "home_location_id",
+    "home_container_id",
 )
 REACQUISITION_RESET_FIELDS = (
     "acquired_on",
@@ -783,6 +815,8 @@ def semantic_failures(rows: dict[str, list[dict]]) -> list[str]:
     locations_by_id = {row.get("location_id"): row for row in rows["locations"]}
     reported_location_cycles: set[object] = set()
     for origin in rows["locations"]:
+        if origin.get("kind") not in LOCATION_KINDS:
+            failures.append(f"location has an unsupported kind: {origin.get('location_id')}")
         current: dict | None = origin
         visited: set[object] = set()
         while current is not None:
@@ -814,6 +848,24 @@ def semantic_failures(rows: dict[str, list[dict]]) -> list[str]:
         ):
             failures.append(
                 f"item has an invalid location/container assignment: "
+                f"{item.get('item_id')} ({error})"
+            )
+        # A home is where the item belongs, not where it currently is.  Null is
+        # honest ignorance; it never silently means "the same as now".
+        home_location_id = item.get("home_location_id")
+        home_container_id = item.get("home_container_id")
+        if home_location_id is not None and locations_by_id.get(home_location_id) is None:
+            failures.append(
+                f"item has an invalid home location/container: "
+                f"{item.get('item_id')} (home location does not exist)"
+            )
+        elif home_container_id is not None and (
+            error := location_assignment_error(
+                rows["locations"], home_location_id, home_container_id
+            )
+        ):
+            failures.append(
+                f"item has an invalid home location/container: "
                 f"{item.get('item_id')} ({error})"
             )
         quantity = item.get("quantity")
@@ -855,6 +907,7 @@ def semantic_failures(rows: dict[str, list[dict]]) -> list[str]:
 
     chronological_by_item: dict[object, list[dict]] = {}
     quantity_events_by_item: dict[object, list[dict]] = {}
+    relation_event_bindings: list[tuple[dict, str]] = []
     for event in rows["inventory_events"]:
         event_id = event.get("event_id")
         event_type = event.get("event_type")
@@ -959,6 +1012,34 @@ def semantic_failures(rows: dict[str, list[dict]]) -> list[str]:
                     quantity_events_by_item.setdefault(event.get("item_id"), []).append(
                         {**event, "_details": details}
                     )
+        elif event_type in {
+            "lent",
+            "loan_returned",
+            "custody_started",
+            "custody_ended",
+            "access_granted",
+            "access_revoked",
+            "ownership_started",
+            "ownership_ended",
+        } and details_raw is not None:
+            if (
+                not isinstance(details, dict)
+                or set(details) != {"relation_id"}
+                or not isinstance(details.get("relation_id"), str)
+                or not details["relation_id"].strip()
+            ):
+                failures.append(f"relation event lacks an exact relation binding: {event_id}")
+            else:
+                relation_event_bindings.append((event, details["relation_id"]))
+        elif event_type in {
+            "custody_started",
+            "custody_ended",
+            "access_granted",
+            "access_revoked",
+            "ownership_started",
+            "ownership_ended",
+        }:
+            failures.append(f"relation event lacks an exact relation binding: {event_id}")
         elif event_type == "reacquired":
             if (
                 not isinstance(details, dict)
@@ -1171,6 +1252,263 @@ def semantic_failures(rows: dict[str, list[dict]]) -> list[str]:
             valid = False
         if not valid:
             failures.append(f"{table} has non-canonical {field}: {row_id}")
+
+    parties_by_id = {row.get("party_id"): row for row in rows["parties"]}
+    for row in rows["parties"]:
+        row_id = row.get("party_id")
+        evidence_id = row.get("evidence_id")
+        if row.get("party_kind") not in PARTY_KINDS:
+            failures.append(f"party has an invalid kind: {row_id}")
+        if evidence_id not in evidence_by_id:
+            failures.append(f"party has no recorded evidence: {row_id}")
+        require_not_lower(
+            "party", row, row_id, ("its evidence", evidence_sensitivity.get(evidence_id))
+        )
+
+    active_allocations: dict[object, float] = {}
+    unknown_active_allocations: set[object] = set()
+    for row in rows["item_party_relations"]:
+        row_id = row.get("relation_id")
+        item_id = row.get("item_id")
+        party_id = row.get("party_id")
+        role = row.get("role")
+        custody_kind = row.get("custody_kind")
+        status = row.get("status")
+        evidence_id = row.get("evidence_id")
+        ended_evidence_id = row.get("ended_evidence_id")
+        if role not in PARTY_RELATION_ROLES:
+            failures.append(f"item party relation has an invalid role: {row_id}")
+        if status not in PARTY_RELATION_STATES:
+            failures.append(f"item party relation has an invalid status: {row_id}")
+        if party_id is None and role in NAMED_PARTY_RELATION_ROLES:
+            failures.append(f"item party relation requires a named party: {row_id}")
+        if party_id is not None and party_id not in parties_by_id:
+            failures.append(f"item party relation names a missing party: {row_id}")
+        # An unresolved custody or access claim is still evidence-backed: only
+        # the counterparty may be unknown, never the reason for believing it.
+        if (item_id, evidence_id) not in item_evidence:
+            failures.append(f"item party relation evidence does not support its item: {row_id}")
+        if ended_evidence_id is not None and (item_id, ended_evidence_id) not in item_evidence:
+            failures.append(
+                f"item party relation end evidence does not support its item: {row_id}"
+            )
+        for field in ("started_on", "ended_on", "due_on"):
+            if row.get(field) is not None:
+                require_date("item party relation", row, row_id, field)
+        started_on = row.get("started_on")
+        ended_on = row.get("ended_on")
+        if status == "active" and ended_on is not None:
+            failures.append(f"active item party relation declares an ended date: {row_id}")
+        if status == "active" and ended_evidence_id is not None:
+            failures.append(f"active item party relation declares end evidence: {row_id}")
+        if status == "ended" and (ended_on is None or ended_evidence_id is None):
+            failures.append(f"ended item party relation lacks end evidence or date: {row_id}")
+        if role == "custodian":
+            if custody_kind not in CUSTODY_KINDS:
+                failures.append(f"custody relation has an invalid custody kind: {row_id}")
+            if status == "active" and evidence_by_id.get(evidence_id, {}).get("claim_strength") != "explicit_current":
+                failures.append(f"active custody lacks explicit-current evidence: {row_id}")
+        elif custody_kind is not None:
+            failures.append(f"non-custody relation declares a custody kind: {row_id}")
+        if role != "custodian" and row.get("due_on") is not None:
+            failures.append(f"non-custody relation declares a due date: {row_id}")
+        quantity = row.get("quantity")
+        unit = row.get("unit")
+        if (quantity is None) != (unit is None):
+            failures.append(f"item party relation has unpaired quantity/unit: {row_id}")
+        if quantity is not None and (
+            isinstance(quantity, bool) or not isinstance(quantity, (int, float))
+            or not math.isfinite(float(quantity)) or quantity <= 0
+            or not isinstance(unit, str) or not unit.strip()
+        ):
+            failures.append(f"item party relation has invalid quantity/unit: {row_id}")
+        item = items_for_quantities.get(item_id, {})
+        if quantity is not None and unit != item.get("unit"):
+            failures.append(f"item party relation unit disagrees with its item: {row_id}")
+        if role != "custodian" and quantity is not None:
+            failures.append(f"non-custody relation declares a quantity: {row_id}")
+        if (
+            isinstance(started_on, str)
+            and isinstance(ended_on, str)
+            and ended_on < started_on
+        ):
+            failures.append(f"item party relation ends before it starts: {row_id}")
+        if (
+            isinstance(started_on, str)
+            and isinstance(row.get("due_on"), str)
+            and row["due_on"] < started_on
+        ):
+            failures.append(f"item party relation is due before it starts: {row_id}")
+        require_not_lower(
+            "item party relation",
+            row,
+            row_id,
+            ("its evidence", evidence_sensitivity.get(evidence_id)),
+            ("its end evidence", evidence_sensitivity.get(ended_evidence_id)),
+            ("its item", item_sensitivity.get(item_id)),
+            ("its party", parties_by_id.get(party_id, {}).get("sensitivity")),
+        )
+        if role == "custodian" and status == "active":
+            if quantity is None:
+                unknown_active_allocations.add(item_id)
+            else:
+                active_allocations[item_id] = active_allocations.get(item_id, 0) + float(quantity)
+    unknown_counts: dict[object, int] = {}
+    for row in rows["item_party_relations"]:
+        if (
+            row.get("role") == "custodian"
+            and row.get("status") == "active"
+            and row.get("quantity") is None
+        ):
+            item_id = row.get("item_id")
+            unknown_counts[item_id] = unknown_counts.get(item_id, 0) + 1
+    for item_id, count in unknown_counts.items():
+        if count > 1:
+            failures.append(f"item has more than one unknown active custody allocation: {item_id}")
+    for item_id, total in active_allocations.items():
+        item = items_for_quantities.get(item_id, {})
+        if item_id in unknown_active_allocations:
+            failures.append(f"item has contradictory unknown and known active custody allocations: {item_id}")
+        elif item.get("quantity") is not None and total > float(item["quantity"]):
+            failures.append(f"active custody allocation exceeds item quantity: {item_id}")
+    relations_by_id = {
+        row.get("relation_id"): row for row in rows["item_party_relations"]
+    }
+    bound_event_ids: set[object] = set()
+    for event, relation_id in relation_event_bindings:
+        bound_event_ids.add(event.get("event_id"))
+        relation = relations_by_id.get(relation_id)
+        event_type = event.get("event_type")
+        if relation is None or relation.get("item_id") != event.get("item_id"):
+            failures.append(f"relation event names a missing or different relation: {event.get('event_id')}")
+            continue
+        if event_type in {"lent", "custody_started"}:
+            valid = (
+                relation.get("role") == "custodian"
+                and relation.get("started_on") == event.get("occurred_on")
+                and relation.get("evidence_id") == event.get("evidence_id")
+                and ((event_type == "lent") == (relation.get("custody_kind") == "loan"))
+            )
+        elif event_type in {"loan_returned", "custody_ended"}:
+            valid = (
+                relation.get("role") == "custodian"
+                and relation.get("status") == "ended"
+                and relation.get("ended_on") == event.get("occurred_on")
+                and relation.get("ended_evidence_id") == event.get("evidence_id")
+                and ((event_type == "loan_returned") == (relation.get("custody_kind") == "loan"))
+            )
+        elif event_type in {"access_granted", "ownership_started"}:
+            valid = (
+                relation.get("role")
+                == ("access" if event_type == "access_granted" else "owner")
+                and relation.get("started_on") == event.get("occurred_on")
+                and relation.get("evidence_id") == event.get("evidence_id")
+            )
+        else:
+            valid = (
+                event_type in {"access_revoked", "ownership_ended"}
+                and relation.get("role")
+                == ("access" if event_type == "access_revoked" else "owner")
+                and relation.get("status") == "ended"
+                and relation.get("ended_on") == event.get("occurred_on")
+                and relation.get("ended_evidence_id") == event.get("evidence_id")
+            )
+        if not valid:
+            failures.append(f"relation event disagrees with its relation: {event.get('event_id')}")
+    for item_id, events in chronological_by_item.items():
+        legacy_loan_events = [
+            event
+            for event in events
+            if event.get("event_type") in {"lent", "loan_returned"}
+            and event.get("event_id") not in bound_event_ids
+        ]
+        if not legacy_loan_events:
+            continue
+        latest = max(legacy_loan_events, key=lambda row: row.get("sequence", -1))
+        later_bound_legacy_relation_event = any(
+            event.get("item_id") == item_id
+            and event.get("sequence", -1) > latest.get("sequence", -1)
+            and relation_id in relations_by_id
+            and relations_by_id[relation_id].get("role") == "custodian"
+            and relations_by_id[relation_id].get("custody_kind") == "loan"
+            and relations_by_id[relation_id].get("party_id") is None
+            and relations_by_id[relation_id].get("started_on") is None
+            for event, relation_id in relation_event_bindings
+        )
+        active_loans = [
+            row
+            for row in rows["item_party_relations"]
+            if row.get("item_id") == item_id
+            and row.get("role") == "custodian"
+            and row.get("custody_kind") == "loan"
+            and row.get("status") == "active"
+        ]
+        if (
+            latest.get("event_type") == "lent"
+            and not active_loans
+            and not later_bound_legacy_relation_event
+        ):
+            failures.append(f"latest legacy lent event has no active loan custody: {item_id}")
+        if latest.get("event_type") == "loan_returned" and active_loans:
+            failures.append(f"legacy loan return event does not close active loan custody: {item_id}")
+
+    # An owned item may itself be a place: a toolbox, a van, a filing cabinet.
+    # That is one node in the same tree, never a second placement table.
+    embodied_items: set[object] = set()
+    embodied_locations: set[object] = set()
+    embodiment_placements: dict[object, object] = {}
+    for row in rows["location_embodiments"]:
+        row_id = row.get("embodiment_id")
+        item_id = row.get("item_id")
+        location_id = row.get("location_id")
+        evidence_id = row.get("evidence_id")
+        item = items_for_quantities.get(item_id)
+        if item is None:
+            failures.append(f"location embodiment names a missing item: {row_id}")
+        if locations_by_id.get(location_id) is None:
+            failures.append(f"location embodiment names a missing location: {row_id}")
+        if item_id in embodied_items:
+            failures.append(f"item provides more than one location embodiment: {item_id}")
+        if location_id in embodied_locations:
+            failures.append(f"location embodiment is claimed more than once: {location_id}")
+        embodied_items.add(item_id)
+        embodied_locations.add(location_id)
+        if (item_id, evidence_id) not in item_evidence:
+            failures.append(f"location embodiment evidence does not support its item: {row_id}")
+        require_not_lower(
+            "location embodiment",
+            row,
+            row_id,
+            ("its evidence", evidence_sensitivity.get(evidence_id)),
+            ("its item", item_sensitivity.get(item_id)),
+            ("its location", location_ancestry_sensitivity(location_id)),
+        )
+        if item is not None:
+            placement = item.get("container_id") or item.get("location_id")
+            parent = locations_by_id.get(location_id, {}).get("parent_location_id")
+            if placement != parent:
+                failures.append(
+                    f"location embodiment parent does not match item current placement: {row_id}"
+                )
+            if item.get("ownership_state") != "confirmed":
+                failures.append(f"location embodiment item is not current or owned: {row_id}")
+            if placement is not None:
+                embodiment_placements[location_id] = placement
+    # The embodied node sits wherever its item sits.  If that position is inside
+    # the node itself, directly or through another embodiment, the arrangement
+    # is physically impossible rather than merely unrecorded.
+    for embodied_location, placement in embodiment_placements.items():
+        node: object | None = placement
+        seen_nodes: set[object] = set()
+        while node is not None and node not in seen_nodes:
+            if node == embodied_location:
+                failures.append(
+                    f"location embodiment creates a containment cycle: {embodied_location}"
+                )
+                break
+            seen_nodes.add(node)
+            parent = locations_by_id.get(node, {}).get("parent_location_id")
+            node = parent if parent is not None else embodiment_placements.get(node)
 
     def require_timestamp(table: str, row: dict, row_id: object, field: str) -> None:
         value = row.get(field)
@@ -2151,6 +2489,34 @@ def insert_rows(con: sqlite3.Connection, table: str, rows: list[dict]) -> None:
     )
 
 
+def parent_first_locations(rows: list[dict]) -> list[dict]:
+    """Return one validated location tree in FK-safe parent-before-child order."""
+    by_id = {row["location_id"]: row for row in rows}
+    ordered: list[dict] = []
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(location_id: str) -> None:
+        if location_id in visited:
+            return
+        if location_id in visiting:
+            raise SchemaVersionError(f"location cycle: {location_id}")
+        visiting.add(location_id)
+        row = by_id[location_id]
+        parent_id = row.get("parent_location_id")
+        if parent_id is not None:
+            if parent_id not in by_id:
+                raise SchemaVersionError(f"location parent is missing: {location_id}")
+            visit(parent_id)
+        visiting.remove(location_id)
+        visited.add(location_id)
+        ordered.append(row)
+
+    for row in rows:
+        visit(row["location_id"])
+    return ordered
+
+
 def rebuild(store: Path, schema: Path, database: Path) -> dict:
     """Atomically replace ``database`` with a projection of a valid current store."""
     rows = load_store_current(store)
@@ -2170,7 +2536,10 @@ def rebuild(store: Path, schema: Path, database: Path) -> dict:
         os.chmod(temporary, 0o600, follow_symlinks=False)
         con.executescript(schema.read_text())
         for table in TABLES:
-            insert_rows(con, table, rows[table])
+            table_rows = (
+                parent_first_locations(rows[table]) if table == "locations" else rows[table]
+            )
+            insert_rows(con, table, table_rows)
         con.execute(
             "INSERT INTO projection_state(store_digest) VALUES (?)",
             (canonical_store_digest(store),),

@@ -9,7 +9,7 @@ It records individual objects, where they are, their condition, the interfaces t
 I built it because I wanted a durable way to record and query what I physically own, and to stop buying duplicates.
 
 <p align="center">
-  <img src="docs/assets/property-inventory-demo.gif" width="800" alt="A real CLI query finds one physically checked T25 Torx bit in the tool drawer, with confirmed ownership and working condition.">
+  <img src="docs/assets/property-inventory-demo.gif" width="800" alt="A real CLI query finds one physically checked T25 Torx bit at Cambridge home, inside a named room, drawer unit, drawer, and section.">
 </p>
 
 ## See it answer a real question
@@ -27,7 +27,8 @@ $ property-inventory search "T25" --summary
       "name": "T25 Torx bit",
       "ownership": "confirmed",
       "condition": "working",
-      "location": "Tool drawer",
+      "location": "Study",
+      "location_path": "Cambridge home / Study / Drawer unit / Second drawer / Rear section",
       "last_physical_check_on": "2026-08-09",
       "evidence_types": [
         "physical_check"
@@ -41,15 +42,17 @@ $ property-inventory search "T25" --summary
 ```
 <!-- readme-example:end -->
 
-The item is a distinct physical unit, current possession was confirmed in person, its condition is working, and its last known location is the tool drawer. A search with no match returns `unknown, not absent`; it never turns a missing record into a claim that you do not own something.
+The item is a distinct physical unit, current possession was confirmed in person, its condition is working, and its last known location is the rear section of a specific drawer unit. A search with no match returns `unknown, not absent`; it never turns a missing record into a claim that you do not own something.
 
 ## What you can ask
 
 | Command | Question |
 |---|---|
 | `search` | Do I already own this, and where is it? |
+| `locations` | What is the full path to this room, drawer, bag, box, vehicle, or section? |
 | `context` | What recorded items are relevant to this repair or task? |
 | `compatibility` | Do these two exact items have matching interfaces? |
+| `ownership-*` / `custody-*` / `access-*` | Who owns, holds, borrowed, stores, services, or can use this item? |
 | `kit-status` / `torque-check` | Is this tool setup complete and within its recorded limits? |
 | `fit` / `pack` / `free-volume` | Will measured items fit in this checked container? |
 | `insurance-status` | Which owned items have enough evidence, and what is missing? |
@@ -70,6 +73,10 @@ lock -> backup -> stage -> rebuild -> render -> verify -> replace
 ```
 
 `Data/store/*.jsonl` is the source of truth. SQLite and the Markdown catalogue are generated views and can be rebuilt.
+
+Locations form one tree with no fixed depth. A path can be `Cambridge home / Study / Drawer unit / Second drawer / Rear section`, or continue through more containers when reality requires it. An item's usual home and its current placement are separate facts. Moving or lending it changes the current placement or custodian without erasing where it belongs or who owns it.
+
+People and organisations are recorded separately from places. Ownership, custody, and access are evidence-backed episodes with their own start and end evidence. Several units from one quantity can be split across borrowers; unknown quantities remain unknown rather than being forced into a total.
 
 ## What it refuses to guess
 
@@ -121,14 +128,38 @@ property-inventory status --summary
 
 ## Record the first item
 
-For a direct check, the CLI caller supplies what was physically observed. A person or an agent acting on explicit observations runs `discover` to record the physical check, current possession, condition, quantity, and location in one verified transaction:
+For a direct check, the CLI caller supplies what was physically observed. A person or an agent acting on explicit observations runs `discover` to record the physical check, ownership status, condition, quantity, and location in one verified transaction:
 
 <!-- readme-capture:start -->
 ```bash
 property-inventory add-location \
-  --location-id loc-tool-drawer \
-  --name "Tool drawer" \
-  --kind container
+  --location-id loc-cambridge-home \
+  --name "Cambridge home" \
+  --kind site
+
+property-inventory add-location \
+  --location-id loc-study \
+  --parent-location-id loc-cambridge-home \
+  --name "Study" \
+  --kind room
+
+property-inventory add-location \
+  --location-id loc-drawer-unit \
+  --parent-location-id loc-study \
+  --name "Drawer unit" \
+  --kind furniture
+
+property-inventory add-location \
+  --location-id loc-second-drawer \
+  --parent-location-id loc-drawer-unit \
+  --name "Second drawer" \
+  --kind compartment
+
+property-inventory add-location \
+  --location-id loc-rear-section \
+  --parent-location-id loc-second-drawer \
+  --name "Rear section" \
+  --kind compartment
 
 property-inventory discover \
   --actor "Owner" \
@@ -136,7 +167,8 @@ property-inventory discover \
   --name "T25 Torx bit" \
   --category tool \
   --checked-on "$(date +%F)" \
-  --location-id loc-tool-drawer \
+  --location-id loc-study \
+  --container-id loc-rear-section \
   --new-model \
   --new-unit \
   --brand Wera \
@@ -150,6 +182,8 @@ property-inventory search "T25" --summary
 <!-- readme-capture:end -->
 
 For an item that may already exist, search first and use `--existing-model-id` or `--existing-item-id`. `--new-unit` is an explicit assertion that this is a different physical object.
+
+`discover` defaults to confirmed ownership. For a newly distinguished object that is physically present but borrowed or unresolved, use `--ownership-state not_owned` or `--ownership-state unknown`, then record the known owner and custody episode with `ownership-start` and `custody-start`. A loan never changes the ownership fact.
 
 ## Connect an agent
 
