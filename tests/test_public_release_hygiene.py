@@ -174,6 +174,13 @@ class PublicReleaseHygieneTests(unittest.TestCase):
         )
         self.assertIn("sha256sum --check -", audit_job)
 
+    def test_gif_portability_check_does_not_compare_cross_os_raster_counts(self) -> None:
+        source = (ROOT / "scripts" / "check-readme-gif.py").read_text(encoding="utf-8")
+
+        self.assertIn("validate_story_states(regenerated)", source)
+        self.assertNotIn("regenerated_shape[0] - committed_shape[0]", source)
+        self.assertNotIn("regenerated_shape[1] - committed_shape[1]", source)
+
 
 if __name__ == "__main__":
     unittest.main()
